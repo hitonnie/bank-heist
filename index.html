@@ -219,7 +219,7 @@
       <li><b>+100</b> per robber &middot; <b>+50</b> headshot &middot; combo up to <b>x5</b> (a miss resets it)</li>
       <li><b>5 bullets</b> &mdash; headshots refund the bullet &middot; auto-reloads when empty</li>
       <li>Hits add time: <b>+1s</b> (headshot <b>+1.75s</b>) &middot; clock starts at 25s</li>
-      <li>Bomber: 2 hits in 5s = <b>+500 &amp; +3s</b>, or BOOM: <b class="safe">&minus;300 &amp; &minus;5s</b></li>
+      <li>Bomber: 2 hits in 5s = <b>+500 &amp; +3s</b>, or BOOM: <b class="safe">&minus;600 &amp; &minus;5s</b></li>
       <li><b>15 kills in a row</b> = BERSERK: minigun, unlimited ammo, hold to fire</li>
       <li>Shoot a civilian and it's <b class="safe">instant game over</b></li>
     </ul>
@@ -283,7 +283,8 @@
 const W = 1280, H = 720, TAU = Math.PI * 2;
 const FONT = '"Arial Black","Segoe UI Black","Helvetica Neue",Impact,Arial,sans-serif';
 const CHAR_H = 160;                       // visible body height (local units) when fully up
-const RISE_T = 0.16, DUCK_T = 0.14, HIT_T = 0.6;
+const RISE_T = 0.16, DUCK_T = 0.14, HIT_T = 0.6;     // pop-up / duck times at level 1
+const SPEEDUP_PER_LEVEL = 0.05, SPEEDUP_MAX = 1.6;  // targets pop up & duck 5% faster each level, up to 60%
 const TIME_START = 25, TIME_MAX = 45, TIME_HIT = 1, TIME_HEAD = 1.75;
 const MAX_ON_SCREEN = 5;
 const HITS_PER_LEVEL = 4;                 // level = 1 + floor(robbers hit / 4)
@@ -292,14 +293,11 @@ const SHOT_COOLDOWN = 0.08;
 // Ammo
 const MAG_SIZE = 5, RELOAD_T = 1.2;
 // Bomb robber
-const BOMB_T = 5, BOMB_HP = 2, BOMB_POINTS = 500, BOMB_TIME_BONUS = 3, BOMB_PENALTY = 300, BOMB_TIME_PENALTY = 5;
+const BOMB_T = 5, BOMB_HP = 2, BOMB_POINTS = 500, BOMB_TIME_BONUS = 3, BOMB_PENALTY = 600, BOMB_TIME_PENALTY = 5;
 // Berserk
 const BERSERK_STREAK = 15, BERSERK_T = 5, MINIGUN_RATE = 15, BERSERK_TIME_HIT = 0.5;
 const HS_KEY = 'bankHeistDefender.highScore';
 const MUTE_KEY = 'bankHeistDefender.muted';
-// Background music: a file next to index.html, looped at 6% so the sound effects stay on top.
-const MUSIC_SRC = encodeURIComponent('Playboi Cart- R.I.P instrumental - Mika64 (2).mp3');
-const MUSIC_VOLUME = 0.06;
 const VAULT = { x: 640, y: 300, r: 104, R: 130 };
 const GUN_PIVOT = { x: 640, y: 770 };
 const GUN_MIN_ANGLE = -Math.PI + 0.35, GUN_MAX_ANGLE = -0.35;
@@ -607,50 +605,6 @@ const SFX = {
   berserkEnd() { Sound.tone({ f: 660, f2: 220, d: 0.4, type: 'sawtooth', v: 0.1 }); }
 };
 
-// Looping background track. Plays only during a run: starts from the top when a game starts,
-// pauses with the game or when the tab is hidden, stops on game over / menu, follows mute.
-const Music = {
-  el: null, unlocked: false, wired: false, failed: false,
-  init() {
-    if (!this.el) {
-      const a = new Audio(MUSIC_SRC);
-      a.loop = true; a.preload = 'auto'; a.volume = MUSIC_VOLUME;
-      a.addEventListener('error', () => { this.failed = true; });   // missing file: play on without music
-      this.el = a;
-    }
-    this.unlocked = true;
-    this.wire();
-    this.sync();
-  },
-  // iPhones ignore <audio>.volume, so when served over http(s) route the track through a
-  // Web Audio gain node instead. (Not on file://, where browsers would mute that route.)
-  wire() {
-    if (this.wired || !Sound.ctx || !/^https?:$/.test(location.protocol)) return;
-    try {
-      const src = Sound.ctx.createMediaElementSource(this.el), g = Sound.ctx.createGain();
-      g.gain.value = MUSIC_VOLUME;
-      src.connect(g); g.connect(Sound.ctx.destination);
-      this.el.volume = 1;
-      this.wired = true;
-    } catch (e) { /* keep the plain element volume */ }
-  },
-  sync() {
-    if (!this.el || this.failed) return;
-    const inRun = S.mode === 'playing' || S.mode === 'dying';
-    const play = this.unlocked && inRun && !Sound.muted && !document.hidden;
-    if (play && this.el.paused) {
-      const p = this.el.play();
-      if (p && p.catch) p.catch(() => {});
-    } else if (!play && !this.el.paused) {
-      this.el.pause();
-    }
-  },
-  rewind() {
-    if (!this.el) return;
-    try { this.el.currentTime = 0; } catch (e) { /* not loaded yet: it starts at 0 anyway */ }
-  }
-};
-
 /* =====================================================================
    SPAWNER & DIFFICULTY
    ===================================================================== */
@@ -685,12 +639,18 @@ function makeLook(type, bomb) {
   };
 }
 
+// How much faster targets move (pop up / duck) at the current level: 1.0 at level 1.
+function targetSpeed() {
+  return S.mode === 'menu' ? 1 : Math.min(SPEEDUP_MAX, 1 + SPEEDUP_PER_LEVEL * S.level);
+}
+
 function spawnCharacter(type, bomb = false) {
   const free = freeSpots();
   if (!free.length) return null;
-  const spot = pick(free), d = difficulty();
+  const spot = pick(free), d = difficulty(), speed = targetSpeed();
   const c = {
     id: nextId++, type, spot, state: 'rising', t: 0, pop: 0, angle: 0,
+    riseT: RISE_T / speed, duckT: DUCK_T / speed,
     flash: 0, flashColor: '#fff', fallDir: 1, born: S.clock, safe: false,
     visible: bomb ? Infinity : d.visible * rand(0.9, 1.15) * (type === 'civilian' ? 1.1 : 1),
     look: makeLook(type, bomb),
@@ -710,7 +670,7 @@ function spawnRolled(d) {
 // Duck a character from wherever it is in its pop-up, without a visual jump.
 function duckNow(c) {
   if (!isActive(c)) return;
-  c.t = DUCK_T * Math.sqrt(clamp(1 - Math.min(1, c.pop), 0, 1));
+  c.t = c.duckT * Math.sqrt(clamp(1 - Math.min(1, c.pop), 0, 1));
   c.state = 'ducking';
 }
 
@@ -1162,16 +1122,16 @@ function updateChars(dt) {
     let done = false;
     switch (c.state) {
       case 'rising':
-        c.pop = easeOutBack(Math.min(1, c.t / RISE_T));
-        if (c.t >= RISE_T) { c.state = 'up'; c.t = 0; c.pop = 1; }
+        c.pop = easeOutBack(Math.min(1, c.t / c.riseT));
+        if (c.t >= c.riseT) { c.state = 'up'; c.t = 0; c.pop = 1; }
         break;
       case 'up':
         c.pop = 1;
         if (c.t >= c.visible) { c.state = 'ducking'; c.t = 0; }
         break;
       case 'ducking':
-        c.pop = 1 - easeInQuad(Math.min(1, c.t / DUCK_T));
-        if (c.t >= DUCK_T) done = true;
+        c.pop = 1 - easeInQuad(Math.min(1, c.t / c.duckT));
+        if (c.t >= c.duckT) done = true;
         break;
       case 'hit': {
         const k = Math.min(1, c.t / HIT_T);
@@ -2270,10 +2230,10 @@ canvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false }
 document.addEventListener('gesturestart', e => e.preventDefault());                 // no iOS pinch zoom
 document.addEventListener('dblclick', e => e.preventDefault());
 // Unlock audio on the first gesture (iOS only accepts some event types, so listen to several).
-for (const type of ['pointerdown', 'touchend', 'click']) window.addEventListener(type, () => { Sound.init(); Music.init(); }, true);
+for (const type of ['pointerdown', 'touchend', 'click']) window.addEventListener(type, () => Sound.init(), true);
 
 window.addEventListener('keydown', e => {
-  Sound.init(); Music.init();
+  Sound.init();
   const k = e.key.toLowerCase();
   if (k === 'p' || k === 'escape') {
     if (S.mode === 'playing' || S.mode === 'paused') { e.preventDefault(); togglePause(); }
@@ -2283,7 +2243,7 @@ window.addEventListener('keydown', e => {
     e.preventDefault(); startGame();
   }
 });
-document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); Music.sync(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
 // Some phones blur the page briefly while switching to fullscreen; don't treat that as leaving.
 window.addEventListener('blur', () => { if (performance.now() - FS.lastEnter > 1500) pauseGame(); });
 
@@ -2331,7 +2291,6 @@ const UI = {
     for (const s of this.screens) $(s).classList.toggle('show', s === id);
     document.body.classList.toggle('ingame', !id);
     updateHudButtons();
-    Music.sync();                                  // pause screen pauses the music, others resume it
   },
   refreshFullscreen() {
     $('btnFull').classList.toggle('hidden', !FS.supported());
@@ -2379,8 +2338,7 @@ function startGame() {
   resetRun();
   S.mode = 'playing';
   aim.x = W / 2; aim.y = H / 2; aim.tapT = 0;
-  Music.rewind();                               // every new game starts the song from the top
-  UI.show(null);                                // ...and this starts it playing
+  UI.show(null);
   Sound.play('start');
 }
 function toMenu() {
@@ -2404,7 +2362,7 @@ function resumeGame() {
   UI.show(null);
 }
 function togglePause() { if (S.mode === 'playing') pauseGame(); else resumeGame(); }
-function toggleMute() { Sound.init(); Sound.setMuted(!Sound.muted); UI.refreshSound(); Music.sync(); }
+function toggleMute() { Sound.init(); Sound.setMuted(!Sound.muted); UI.refreshSound(); }
 
 function onClick(el, fn, sfx = true) {
   el.addEventListener('click', e => {
