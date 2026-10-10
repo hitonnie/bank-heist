@@ -297,6 +297,9 @@ const BOMB_T = 5, BOMB_HP = 2, BOMB_POINTS = 500, BOMB_TIME_BONUS = 3, BOMB_PENA
 const BERSERK_STREAK = 15, BERSERK_T = 5, MINIGUN_RATE = 15, BERSERK_TIME_HIT = 0.5;
 const HS_KEY = 'bankHeistDefender.highScore';
 const MUTE_KEY = 'bankHeistDefender.muted';
+// Background music: a file next to index.html, looped at 6% so the sound effects stay on top.
+const MUSIC_SRC = encodeURIComponent('Playboi Cart- R.I.P instrumental - Mika64 (2).mp3');
+const MUSIC_VOLUME = 0.06;
 const VAULT = { x: 640, y: 300, r: 104, R: 130 };
 const GUN_PIVOT = { x: 640, y: 770 };
 const GUN_MIN_ANGLE = -Math.PI + 0.35, GUN_MAX_ANGLE = -0.35;
@@ -602,6 +605,50 @@ const SFX = {
     Sound.tone({ f: 140, f2: 55, d: 0.05, type: 'sine', v: 0.5 });
   },
   berserkEnd() { Sound.tone({ f: 660, f2: 220, d: 0.4, type: 'sawtooth', v: 0.1 }); }
+};
+
+// Looping background track. Plays only during a run: starts from the top when a game starts,
+// pauses with the game or when the tab is hidden, stops on game over / menu, follows mute.
+const Music = {
+  el: null, unlocked: false, wired: false, failed: false,
+  init() {
+    if (!this.el) {
+      const a = new Audio(MUSIC_SRC);
+      a.loop = true; a.preload = 'auto'; a.volume = MUSIC_VOLUME;
+      a.addEventListener('error', () => { this.failed = true; });   // missing file: play on without music
+      this.el = a;
+    }
+    this.unlocked = true;
+    this.wire();
+    this.sync();
+  },
+  // iPhones ignore <audio>.volume, so when served over http(s) route the track through a
+  // Web Audio gain node instead. (Not on file://, where browsers would mute that route.)
+  wire() {
+    if (this.wired || !Sound.ctx || !/^https?:$/.test(location.protocol)) return;
+    try {
+      const src = Sound.ctx.createMediaElementSource(this.el), g = Sound.ctx.createGain();
+      g.gain.value = MUSIC_VOLUME;
+      src.connect(g); g.connect(Sound.ctx.destination);
+      this.el.volume = 1;
+      this.wired = true;
+    } catch (e) { /* keep the plain element volume */ }
+  },
+  sync() {
+    if (!this.el || this.failed) return;
+    const inRun = S.mode === 'playing' || S.mode === 'dying';
+    const play = this.unlocked && inRun && !Sound.muted && !document.hidden;
+    if (play && this.el.paused) {
+      const p = this.el.play();
+      if (p && p.catch) p.catch(() => {});
+    } else if (!play && !this.el.paused) {
+      this.el.pause();
+    }
+  },
+  rewind() {
+    if (!this.el) return;
+    try { this.el.currentTime = 0; } catch (e) { /* not loaded yet: it starts at 0 anyway */ }
+  }
 };
 
 /* =====================================================================
@@ -2223,10 +2270,10 @@ canvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false }
 document.addEventListener('gesturestart', e => e.preventDefault());                 // no iOS pinch zoom
 document.addEventListener('dblclick', e => e.preventDefault());
 // Unlock audio on the first gesture (iOS only accepts some event types, so listen to several).
-for (const type of ['pointerdown', 'touchend', 'click']) window.addEventListener(type, () => Sound.init(), true);
+for (const type of ['pointerdown', 'touchend', 'click']) window.addEventListener(type, () => { Sound.init(); Music.init(); }, true);
 
 window.addEventListener('keydown', e => {
-  Sound.init();
+  Sound.init(); Music.init();
   const k = e.key.toLowerCase();
   if (k === 'p' || k === 'escape') {
     if (S.mode === 'playing' || S.mode === 'paused') { e.preventDefault(); togglePause(); }
@@ -2236,7 +2283,7 @@ window.addEventListener('keydown', e => {
     e.preventDefault(); startGame();
   }
 });
-document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); Music.sync(); });
 // Some phones blur the page briefly while switching to fullscreen; don't treat that as leaving.
 window.addEventListener('blur', () => { if (performance.now() - FS.lastEnter > 1500) pauseGame(); });
 
@@ -2284,6 +2331,7 @@ const UI = {
     for (const s of this.screens) $(s).classList.toggle('show', s === id);
     document.body.classList.toggle('ingame', !id);
     updateHudButtons();
+    Music.sync();                                  // pause screen pauses the music, others resume it
   },
   refreshFullscreen() {
     $('btnFull').classList.toggle('hidden', !FS.supported());
@@ -2331,7 +2379,8 @@ function startGame() {
   resetRun();
   S.mode = 'playing';
   aim.x = W / 2; aim.y = H / 2; aim.tapT = 0;
-  UI.show(null);
+  Music.rewind();                               // every new game starts the song from the top
+  UI.show(null);                                // ...and this starts it playing
   Sound.play('start');
 }
 function toMenu() {
@@ -2355,7 +2404,7 @@ function resumeGame() {
   UI.show(null);
 }
 function togglePause() { if (S.mode === 'playing') pauseGame(); else resumeGame(); }
-function toggleMute() { Sound.init(); Sound.setMuted(!Sound.muted); UI.refreshSound(); }
+function toggleMute() { Sound.init(); Sound.setMuted(!Sound.muted); UI.refreshSound(); Music.sync(); }
 
 function onClick(el, fn, sfx = true) {
   el.addEventListener('click', e => {
