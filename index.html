@@ -1,0 +1,2474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#07090e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Bank Heist Defender</title>
+<style>
+  :root {
+    --gold: #ffcf4a;
+    --red: #ff4b4b;
+    --green: #3ee07a;
+    --ink: #f5efe0;
+    --muted: #b9b1a0;
+    --display: "Arial Black", "Segoe UI Black", "Helvetica Neue", Impact, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; width: 100%; height: 100%; overflow: hidden;
+    background: radial-gradient(ellipse at center, #141a26 0%, #06080c 75%) #06080c;
+    color: var(--ink);
+    font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
+
+  /* ---------- stage: always a landscape box. On phones held upright it is
+     rotated 90deg so the game fills the screen (works with rotation lock on). ---------- */
+  #stage { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; overflow: hidden; transform-origin: 0 0; }
+
+  /* ---------- game area (16:9, letterboxed inside the stage) ---------- */
+  #wrap {
+    position: absolute; left: 0; top: 0; width: 100vw; height: 56.25vw;
+    --u: 1px;                                    /* 1 logical game pixel in CSS px, set from JS */
+    --b: max(calc(var(--u) * 44), 28px);         /* HUD button size */
+    box-shadow: 0 0 0 1px rgba(255, 207, 74, .15), 0 20px 80px rgba(0, 0, 0, .7);
+  }
+  body.touch #wrap { --b: max(calc(var(--u) * 44), 40px); }   /* never below a thumb-friendly 40px on touch */
+  #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: none; touch-action: none; }
+
+  .hudbtn {
+    position: absolute; top: calc(var(--u) * 7);
+    width: var(--b); height: var(--b);
+    padding: 0; border-radius: 22%;
+    border: 2px solid rgba(255, 207, 74, .55); background: rgba(10, 12, 18, .82); color: var(--gold);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; z-index: 5; touch-action: manipulation;
+    transition: transform .1s, background .15s;
+  }
+  .hudbtn:hover { background: rgba(48, 40, 18, .92); }
+  .hudbtn:active { transform: scale(.9); }
+  .hudbtn svg { width: 58%; height: 58%; }
+  #btnMute { right: calc(var(--u) * 10); }
+  #btnPause { right: calc(var(--u) * 18 + var(--b)); }
+  #btnFull { right: calc(var(--u) * 26 + var(--b) * 2); }
+  .hidden { display: none !important; }
+
+  /* Shown (unrotated) when the stage is rotated for a phone held upright */
+  #rotateHint {
+    position: fixed; left: 50%; top: max(14px, env(safe-area-inset-top)); transform: translateX(-50%);
+    z-index: 30; display: none; pointer-events: none; white-space: nowrap;
+    padding: 8px 16px; border-radius: 999px; font-size: 14px; font-weight: 800;
+    color: var(--gold); background: rgba(10, 12, 18, .85); border: 1px solid rgba(255, 207, 74, .45);
+  }
+  body.rotated:not(.ingame) #rotateHint { display: block; }
+
+  /* ---------- overlay screens ---------- */
+  .overlay {
+    position: absolute; inset: 0; z-index: 10; display: none; overflow: auto; padding: 16px;
+    padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right));
+    background: radial-gradient(ellipse at center, rgba(8, 10, 16, .5), rgba(4, 5, 8, .9));
+    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+    touch-action: pan-x pan-y; cursor: default;
+  }
+  .overlay.show { display: flex; }
+  .panel {
+    margin: auto; width: min(620px, 100%); text-align: center;
+    padding: clamp(16px, 3.2vmin, 30px) clamp(16px, 4vmin, 36px);
+    background: linear-gradient(180deg, rgba(28, 32, 44, .97), rgba(12, 14, 20, .97));
+    border: 2px solid rgba(255, 207, 74, .5); border-radius: 20px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .06);
+    animation: pop .35s cubic-bezier(.2, 1.4, .4, 1);
+  }
+  @keyframes pop { from { transform: scale(.86); opacity: 0; } to { transform: none; opacity: 1; } }
+  .eyebrow { font-size: 12px; letter-spacing: .32em; color: var(--muted); font-weight: 800; margin-bottom: 8px; }
+  h1 {
+    font-family: var(--display); font-size: clamp(32px, 7.2vmin, 62px); line-height: .95;
+    margin: 0 0 12px; color: var(--gold); letter-spacing: .01em;
+    text-shadow: 0 3px 0 #9a5d00, 0 8px 22px rgba(0, 0, 0, .7);
+  }
+  .lead { font-size: clamp(17px, 2.9vmin, 23px); font-weight: 900; margin: 0 0 14px; }
+  .shoot { color: #ff5a5a; }
+  .safe { color: #4cf08c; }
+
+  .legend { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin: 0 0 14px; }
+  .card { flex: 1 1 150px; max-width: 220px; border-radius: 14px; padding: 10px 10px 12px; background: rgba(255, 255, 255, .04); border: 2px solid; }
+  .card.bad { border-color: rgba(255, 60, 60, .75); box-shadow: inset 0 0 26px rgba(255, 40, 40, .14); }
+  .card.good { border-color: rgba(60, 224, 122, .75); box-shadow: inset 0 0 26px rgba(40, 255, 120, .12); }
+  .card canvas { width: 130px; height: 140px; display: block; margin: 0 auto 8px; border-radius: 8px; }
+  .card b { display: block; font-family: var(--display); font-size: 18px; letter-spacing: .06em; }
+  .card.bomb { border-color: rgba(255, 170, 30, .85); box-shadow: inset 0 0 26px rgba(255, 140, 0, .18); }
+  .card.bad b { color: #ff5a5a; }
+  .card.good b { color: #4cf08c; }
+  .card.bomb b { color: #ffb31a; }
+  .card small { color: var(--muted); font-size: 13px; }
+
+  .rules { list-style: none; padding: 0; margin: 0 0 18px; font-size: clamp(13px, 2.2vmin, 15px); color: #ddd5c4; line-height: 1.6; }
+  .rules b { color: var(--gold); }
+  .rules b.safe { color: #ff6060; }
+
+  .btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    font-family: var(--display); font-size: clamp(17px, 3.1vmin, 23px); letter-spacing: .08em;
+    padding: .6em 1.5em; border-radius: 14px; cursor: pointer; touch-action: manipulation;
+    border: 2px solid rgba(255, 207, 74, .55); background: rgba(255, 255, 255, .06); color: var(--ink);
+    transition: transform .1s, filter .15s, box-shadow .1s;
+  }
+  .btn:hover { filter: brightness(1.12); }
+  .btn:active { transform: translateY(2px); }
+  .btn.primary {
+    background: linear-gradient(180deg, #ffd960, #e9a223); color: #2a1a00; border-color: #fff1b8;
+    box-shadow: 0 6px 0 #8a5600, 0 12px 24px rgba(0, 0, 0, .4);
+  }
+  .btn.primary:active { transform: translateY(4px); box-shadow: 0 2px 0 #8a5600, 0 6px 12px rgba(0, 0, 0, .4); }
+  .foot { margin-top: 16px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+  .foot b { color: var(--gold); }
+  .linkbtn { background: none; border: none; color: var(--gold); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 2px 4px; }
+
+  .tag { display: inline-block; padding: 5px 14px; border-radius: 999px; font-weight: 900; letter-spacing: .22em; font-size: 12px; border: 1px solid; }
+  .tag.bad { background: rgba(255, 69, 69, .15); color: #ff7070; border-color: rgba(255, 69, 69, .5); }
+  .tag.time { background: rgba(255, 207, 74, .12); color: var(--gold); border-color: rgba(255, 207, 74, .5); }
+  #overReason { font-family: var(--display); font-size: clamp(26px, 5.6vmin, 46px); margin: 12px 0 4px; line-height: 1.05; }
+  #overReason.bad { color: #ff5555; }
+  #overReason.time { color: var(--gold); }
+  .newhigh { color: var(--gold); font-weight: 900; letter-spacing: .14em; margin-top: 6px; animation: glow .7s infinite alternate; }
+  @keyframes glow { from { opacity: .6; transform: scale(.97); } to { opacity: 1; transform: scale(1.03); } }
+  #overScreen .panel { width: min(700px, 100%); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0 20px; }
+  .stat { background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08); border-radius: 12px; padding: 10px 6px; }
+  .stat span { display: block; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
+  .stat b { display: block; font-family: var(--display); font-size: clamp(20px, 4vmin, 28px); margin-top: 2px; }
+  .stat.big { grid-column: 1 / -1; }
+  .stat.big b { font-size: clamp(34px, 7vmin, 54px); color: var(--gold); }
+  #pauseScreen h1 { margin-bottom: 20px; }
+
+  /* start panel: stacked on roomy screens, two columns on short (phone landscape) screens */
+  .panel.start { display: grid; grid-template-areas: "head" "legend" "rules" "play" "foot"; }
+  .start .head { grid-area: head; }
+  .start .legend { grid-area: legend; }
+  .start .rules { grid-area: rules; }
+  .start .play { grid-area: play; }
+  .start .foot { grid-area: foot; }
+  .touch-only { display: none; }
+  body.touch .touch-only { display: inline; }
+  body.touch .mouse-only { display: none; }
+
+  /* ---------- compact layout for short screens (phones in landscape) ---------- */
+  body.compact .overlay { padding: 8px; }
+  body.compact .panel { padding: 12px 18px; border-radius: 16px; }
+  body.compact .eyebrow { display: none; }
+  body.compact h1 { font-size: 30px; margin-bottom: 6px; }
+  body.compact .lead { font-size: 16px; margin-bottom: 8px; }
+  body.compact .panel.start {
+    width: min(860px, 100%); column-gap: 18px; align-items: center;
+    grid-template-columns: 1.15fr 1fr;
+    grid-template-areas: "head legend" "rules legend" "play legend" "foot foot";
+  }
+  body.compact .legend { margin: 0; flex-wrap: nowrap; gap: 10px; }
+  body.compact .card { flex: 1 1 0; padding: 6px 6px 8px; }
+  body.compact .card canvas { width: 80px; height: 86px; margin-bottom: 3px; }
+  body.compact .card b { font-size: 13px; }
+  body.compact .card small { font-size: 10px; line-height: 1.25; display: block; }
+  body.compact .rules { font-size: 11.5px; line-height: 1.4; margin-bottom: 8px; }
+  body.compact .foot { margin-top: 8px; font-size: 12px; line-height: 1.5; }
+  body.compact .btn { font-size: 17px; }
+  body.compact #pauseScreen h1 { margin-bottom: 14px; }
+  body.compact #overReason { font-size: 24px; margin: 4px 0 2px; }
+  body.compact .newhigh { margin-top: 2px; font-size: 13px; }
+  body.compact .stats { grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 8px 0 10px; }
+  body.compact .stat { padding: 4px; border-radius: 9px; }
+  body.compact .stat span { font-size: 9px; letter-spacing: .05em; }
+  body.compact .stat b { font-size: 17px; margin-top: 0; }
+  body.compact .stat.big b { font-size: 28px; }
+  body.compact #overScreen .btn { padding: .45em 1.3em; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+<div id="wrap">
+  <canvas id="game" aria-label="Bank Heist Defender game area"></canvas>
+  <button id="btnFull" class="hudbtn hidden" aria-label="Fullscreen" title="Fullscreen"></button>
+  <button id="btnPause" class="hudbtn hidden" aria-label="Pause" title="Pause (P)">
+    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="5.5" y="4.5" width="4.5" height="15" rx="1.2"/><rect x="14" y="4.5" width="4.5" height="15" rx="1.2"/></svg>
+  </button>
+  <button id="btnMute" class="hudbtn" aria-label="Mute" title="Mute (M)"></button>
+</div>
+
+<!-- START SCREEN -->
+<div id="startScreen" class="overlay show">
+  <div class="panel start">
+    <div class="head">
+      <div class="eyebrow">&#9733; SECURITY ON DUTY &#9733;</div>
+      <h1>BANK HEIST<br>DEFENDER</h1>
+      <p class="lead"><span class="shoot">Shoot robbers.</span> <span class="safe">Don't shoot civilians.</span></p>
+    </div>
+    <div class="legend">
+      <div class="card bad"><canvas id="legRobber" width="130" height="140"></canvas><b>ROBBER</b><small>Red mask &amp; outline &middot; SHOOT!</small></div>
+      <div class="card bomb"><canvas id="legBomb" width="130" height="140"></canvas><b>BOMBER</b><small>2 hits before the fuse runs out!</small></div>
+      <div class="card good"><canvas id="legCiv" width="130" height="140"></canvas><b>CIVILIAN</b><small>Green outline &middot; HOLD FIRE!</small></div>
+    </div>
+    <ul class="rules">
+      <li><b>+100</b> per robber &middot; <b>+50</b> headshot &middot; combo up to <b>x5</b> (a miss resets it)</li>
+      <li><b>5 bullets</b> &mdash; headshots refund the bullet &middot; auto-reloads when empty</li>
+      <li>Hits add time: <b>+1s</b> (headshot <b>+1.75s</b>) &middot; clock starts at 25s</li>
+      <li>Bomber: 2 hits in 5s = <b>+500 &amp; +3s</b>, or BOOM: <b class="safe">&minus;300 &amp; &minus;5s</b></li>
+      <li><b>15 kills in a row</b> = BERSERK: minigun, unlimited ammo, hold to fire</li>
+      <li>Shoot a civilian and it's <b class="safe">instant game over</b></li>
+    </ul>
+    <div class="btns play"><button class="btn primary" id="btnPlay">PLAY</button></div>
+    <div class="foot">
+      High score: <b id="menuBest">0</b> &middot; Devs High Score: <b>91,050</b><br>
+      <span class="mouse-only">Click to shoot &middot; P = pause &middot; M = mute &middot;</span>
+      <span class="touch-only">Tap to shoot &middot;</span>
+      <button class="linkbtn soundToggle" type="button">Sound: On</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAUSE SCREEN -->
+<div id="pauseScreen" class="overlay">
+  <div class="panel">
+    <div class="eyebrow">TAKE A BREATH</div>
+    <h1>PAUSED</h1>
+    <div class="btns">
+      <button class="btn primary" id="btnResume">RESUME</button>
+      <button class="btn" id="btnRestart">RESTART</button>
+      <button class="btn" id="btnQuit">MENU</button>
+    </div>
+    <div class="foot"><button class="linkbtn soundToggle" type="button">Sound: On</button></div>
+  </div>
+</div>
+
+<!-- GAME OVER SCREEN -->
+<div id="overScreen" class="overlay">
+  <div class="panel">
+    <div id="overTag" class="tag bad">GAME OVER</div>
+    <h2 id="overReason" class="bad">You shot a civilian!</h2>
+    <div id="newHigh" class="newhigh hidden">&#9733; NEW HIGH SCORE &#9733;</div>
+    <div class="stats">
+      <div class="stat big"><span>Final Score</span><b id="stScore">0</b></div>
+      <div class="stat"><span>High Score</span><b id="stHigh">0</b></div>
+      <div class="stat"><span>Robbers Caught</span><b id="stCaught">0</b></div>
+      <div class="stat"><span>Accuracy</span><b id="stAcc">0%</b></div>
+      <div class="stat"><span>Highest Level</span><b id="stLevel">1</b></div>
+      <div class="stat"><span>Longest Streak</span><b id="stStreak">0</b></div>
+      <div class="stat"><span>Bombs Defused</span><b id="stDefused">0</b></div>
+      <div class="stat"><span>Bombs Exploded</span><b id="stExploded">0</b></div>
+      <div class="stat"><span>Berserk Mode</span><b id="stBerserk">0</b></div>
+    </div>
+    <div class="btns">
+      <button class="btn primary" id="btnAgain">PLAY AGAIN</button>
+      <button class="btn" id="btnMenu">MENU</button>
+    </div>
+  </div>
+</div>
+</div><!-- /stage -->
+<div id="rotateHint">&#8635; Turn your phone sideways</div>
+
+<script>
+(() => {
+'use strict';
+
+/* =====================================================================
+   CONFIG
+   ===================================================================== */
+const W = 1280, H = 720, TAU = Math.PI * 2;
+const FONT = '"Arial Black","Segoe UI Black","Helvetica Neue",Impact,Arial,sans-serif';
+const CHAR_H = 160;                       // visible body height (local units) when fully up
+const RISE_T = 0.16, DUCK_T = 0.14, HIT_T = 0.6;
+const TIME_START = 25, TIME_MAX = 45, TIME_HIT = 1, TIME_HEAD = 1.75;
+const MAX_ON_SCREEN = 5;
+const HITS_PER_LEVEL = 4;                 // level = 1 + floor(robbers hit / 4)
+const DROUGHT_LIMIT = 1.4;                // force a robber well before the 2s "no robber" limit
+const SHOT_COOLDOWN = 0.08;
+// Ammo
+const MAG_SIZE = 5, RELOAD_T = 1.2;
+// Bomb robber
+const BOMB_T = 5, BOMB_HP = 2, BOMB_POINTS = 500, BOMB_TIME_BONUS = 3, BOMB_PENALTY = 300, BOMB_TIME_PENALTY = 5;
+// Berserk
+const BERSERK_STREAK = 15, BERSERK_T = 5, MINIGUN_RATE = 15, BERSERK_TIME_HIT = 0.5;
+const HS_KEY = 'bankHeistDefender.highScore';
+const MUTE_KEY = 'bankHeistDefender.muted';
+const VAULT = { x: 640, y: 300, r: 104, R: 130 };
+const GUN_PIVOT = { x: 640, y: 770 };
+const GUN_MIN_ANGLE = -Math.PI + 0.35, GUN_MAX_ANGLE = -0.35;
+
+// Pop-up spots, back row (0) to front row (2). coverTop = line characters rise above.
+const SPOTS = [
+  { x: 110,  coverTop: 388, s: 0.72, kind: 'door',    row: 0 },
+  { x: 640,  coverTop: 360, s: 0.72, kind: 'vault',   row: 0 },
+  { x: 1170, coverTop: 388, s: 0.72, kind: 'door',    row: 0 },
+  { x: 390,  coverTop: 500, s: 0.90, kind: 'counter', row: 1, label: 'TELLER 1' },
+  { x: 890,  coverTop: 500, s: 0.90, kind: 'counter', row: 1, label: 'TELLER 2' },
+  { x: 180,  coverTop: 590, s: 1.08, kind: 'desk',    row: 2 },
+  { x: 1100, coverTop: 590, s: 1.08, kind: 'desk',    row: 2 },
+].map((s, i) => Object.assign({ id: i, char: null, cooldown: 0 }, s));
+const ROWS = [0, 1, 2].map(r => SPOTS.filter(s => s.row === r));
+
+const SKINS = ['#f2c9a0', '#e0ac7e', '#c68953', '#8d5a3b', '#f5d6b8', '#6b4429'];
+const HAIRS = ['#2b1d14', '#5a3a1e', '#c8902f', '#1a1a1a', '#8a4b2a', '#d9d4c7'];
+const ROBBER_CLOTH = ['#23262d', '#1c2430', '#2a2230', '#262626', '#2d2a24'];
+const BOMB_CLOTH = ['#ef7d14', '#f2a90f'];
+const CIV_SHIRTS = ['#4fb8ff', '#ffd23f', '#ff8fc8', '#ffa64d', '#b28dff', '#5ce1e6', '#ffffff'];
+const TIES = ['#2b4fd2', '#7a2bd2', '#222a3a', '#e07b00', '#0f7a6a'];
+const COMBO_COLORS = ['#ffffff', '#fff3a0', '#ffcf4a', '#ff9a2e', '#ff4fd8'];
+
+/* =====================================================================
+   UTILITIES
+   ===================================================================== */
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = arr => arr[(Math.random() * arr.length) | 0];
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const easeOutBack = t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+const easeInQuad = t => t * t;
+const easeInCubic = t => t * t * t;
+const fmt = n => Math.round(n).toLocaleString('en-US');
+const $ = id => document.getElementById(id);
+
+const store = {
+  get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } }
+};
+
+function rr(g, x, y, w, h, r) {
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+function capsule(g, x1, y1, x2, y2, r) {
+  const a = Math.atan2(y2 - y1, x2 - x1);
+  g.arc(x1, y1, r, a + Math.PI / 2, a - Math.PI / 2);
+  g.arc(x2, y2, r, a - Math.PI / 2, a + Math.PI / 2);
+  g.closePath();
+}
+function dot(g, x, y, rx, ry, color) {
+  g.fillStyle = color; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, TAU); g.fill();
+}
+function star(g, n, R, r, color) {
+  g.beginPath();
+  for (let i = 0; i < n * 2; i++) {
+    const a = (i / (n * 2)) * TAU, rad = i % 2 ? r : R;
+    i ? g.lineTo(Math.cos(a) * rad, Math.sin(a) * rad) : g.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
+  }
+  g.closePath(); g.fillStyle = color; g.fill();
+}
+function drawText(g, str, x, y, size, fill, o = {}) {
+  g.font = `${o.weight || 900} ${size}px ${FONT}`;
+  g.textAlign = o.align || 'center';
+  g.textBaseline = o.base || 'alphabetic';
+  if (o.stroke !== false) {
+    g.lineJoin = 'round';
+    g.lineWidth = o.sw || Math.max(3, size * 0.14);
+    g.strokeStyle = o.strokeColor || 'rgba(0,0,0,0.85)';
+    g.strokeText(str, x, y);
+  }
+  g.fillStyle = fill;
+  g.fillText(str, x, y);
+}
+
+/* =====================================================================
+   STATE
+   ===================================================================== */
+// Everything that belongs to a single run; reset in one place so restarts are always clean.
+function freshRunState() {
+  return {
+    score: 0, shownScore: 0, time: TIME_START, hits: 0, shots: 0, landed: 0,
+    streak: 0, mult: 1, level: 0, levelPulse: 0,       // streak = combo counter (drives the x1..x5 multiplier)
+    killStreak: 0, bestKillStreak: 0,                  // berserk meter: robber kills in a row, no misses
+    ammo: MAG_SIZE, reloading: false, reloadT: 0, reloadStage: 0, reloadNag: 0, ammoPulse: 0,
+    berserk: false, berserkT: 0, berserkAge: 0, mgCooldown: 0, spinSpeed: 0,
+    bombsDefused: 0, bombsExploded: 0, berserkCount: 0,
+    spawnTimer: 0.6, drought: 0, pendingWave: false, waveTimer: rand(12, 18),
+    dyingT: 0, reason: '', inputGrace: 0.2, lastShot: -1, newHigh: false,
+    shake: 0, redFlash: 0, boomFlash: 0, banner: null, comboPulse: 0
+  };
+}
+const S = Object.assign({
+  mode: 'menu',               // menu | playing | paused | dying | over
+  burstQueue: [], dyingTotal: 1, clock: 0, spin: 0,
+  highScore: parseInt(store.get(HS_KEY), 10) || 0
+}, freshRunState());
+const chars = [], particles = [], popups = [], timeFloaters = [], holes = [], tracers = [], explosions = [];
+const aim = { x: W / 2, y: H / 2, mouse: false, inside: false, tapT: 0 };
+const hold = { down: false, id: null };            // trigger held (mouse button / finger) for the minigun
+// Screen layout: stage size, rotation, and where the 16:9 game box sits inside the stage.
+const view = { rotated: false, vw: 0, wl: 0, wt: 0, ww: W, wh: H, cssScale: 1, uiK: 1, touch: false };
+const gun = { angle: -Math.PI / 2, recoil: 0, flash: 0, flashRot: 0 };
+let nextId = 1;
+
+function clearScene() {
+  chars.length = 0; particles.length = 0; popups.length = 0; explosions.length = 0;
+  timeFloaters.length = 0; holes.length = 0; tracers.length = 0;
+  S.burstQueue.length = 0;
+  for (const sp of SPOTS) { sp.char = null; sp.cooldown = 0; }
+}
+function resetRun() {
+  clearScene();
+  Object.assign(S, freshRunState());
+  gun.recoil = 0; gun.flash = 0;
+  hold.down = false;
+  Sound.setMinigun(false);
+}
+
+/* =====================================================================
+   AUDIO (Web Audio API, all sounds synthesized)
+   ===================================================================== */
+const Sound = {
+  ctx: null, master: null, noiseBuf: null, mg: null,
+  muted: store.get(MUTE_KEY) === '1',
+
+  // Must be called from a user gesture (browser autoplay policy).
+  init() {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      return;
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      const c = new AC();
+      this.ctx = c;
+      this.master = c.createGain();
+      this.master.gain.value = this.muted ? 0 : 0.55;
+      this.master.connect(c.destination);
+      const len = Math.floor(c.sampleRate * 0.8);
+      this.noiseBuf = c.createBuffer(1, len, c.sampleRate);
+      const d = this.noiseBuf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      if (c.state === 'suspended') c.resume().catch(() => {});
+    } catch (e) { this.ctx = null; }
+  },
+  setMuted(m) {
+    this.muted = m;
+    store.set(MUTE_KEY, m ? '1' : '0');
+    if (this.ctx && this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.55, this.ctx.currentTime, 0.02);
+    if (m) this.setMinigun(false);
+  },
+  tone({ f = 440, f2 = 0, d = 0.1, type = 'sine', v = 0.3, at = 0, a = 0.005, sus = false }) {
+    const c = this.ctx, t = c.currentTime + at;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(v, t + a);
+    if (sus) g.gain.setValueAtTime(v, t + d * 0.75);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + d + 0.03);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+  },
+  noise({ d = 0.1, v = 0.3, at = 0, type = 'lowpass', f = 2000, f2 = 0, q = 1 }) {
+    const c = this.ctx, t = c.currentTime + at;
+    const s = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = this.noiseBuf;
+    if (d > 0.7) s.loop = true;                    // long sounds (explosion) outlast the noise buffer
+    fl.type = type; fl.Q.value = q;
+    fl.frequency.setValueAtTime(f, t);
+    if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(v, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    s.connect(fl); fl.connect(g); g.connect(this.master);
+    s.start(t, Math.random() * Math.max(0, 0.75 - d));
+    s.stop(t + d + 0.03);
+    s.onended = () => { s.disconnect(); fl.disconnect(); g.disconnect(); };
+  },
+  play(name, arg) {
+    if (!this.ctx || this.muted || !SFX[name]) return;
+    try { SFX[name](arg); } catch (e) { /* never let audio break the game */ }
+  },
+  // Looping minigun motor while the trigger is held in berserk mode (individual shots are separate SFX).
+  setMinigun(on) {
+    if (on && (!this.ctx || this.muted)) on = false;
+    if (on === !!this.mg) return;
+    try {
+      const c = this.ctx, t = c.currentTime;
+      if (on) {
+        const o = c.createOscillator(), lfo = c.createOscillator(), lg = c.createGain();
+        const f = c.createBiquadFilter(), g = c.createGain();
+        o.type = 'sawtooth'; o.frequency.value = 75;
+        lfo.type = 'square'; lfo.frequency.value = MINIGUN_RATE; lg.gain.value = 30;
+        f.type = 'lowpass'; f.frequency.value = 1100;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
+        lfo.connect(lg); lg.connect(o.frequency);
+        o.connect(f); f.connect(g); g.connect(this.master);
+        o.start(t); lfo.start(t);
+        this.mg = { nodes: [o, lfo, lg, f, g], o, lfo, g };
+      } else {
+        const { nodes, o, lfo, g } = this.mg;
+        this.mg = null;
+        g.gain.cancelScheduledValues(t);
+        g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+        o.stop(t + 0.15); lfo.stop(t + 0.15);
+        o.onended = () => nodes.forEach(n => n.disconnect());
+      }
+    } catch (e) { this.mg = null; }
+  }
+};
+const SFX = {
+  shot() {
+    Sound.noise({ d: 0.2, v: 0.7, type: 'lowpass', f: 6000, f2: 400 });
+    Sound.noise({ d: 0.04, v: 0.35, type: 'highpass', f: 3000 });
+    Sound.tone({ f: 180, f2: 50, d: 0.14, type: 'sine', v: 0.8 });
+  },
+  hit(head) {
+    Sound.noise({ d: 0.09, v: 0.5, type: 'lowpass', f: 1200, f2: 200, at: 0.01 });
+    Sound.tone({ f: 988, d: 0.1, type: 'triangle', v: 0.22, at: 0.04 });
+    Sound.tone({ f: 1319, d: 0.22, type: 'triangle', v: 0.22, at: 0.11 });
+    if (head) Sound.tone({ f: 1976, d: 0.28, type: 'square', v: 0.06, at: 0.17 });
+  },
+  miss() {
+    Sound.tone({ f: 2400, f2: 600, d: 0.2, type: 'sine', v: 0.1, at: 0.03 });
+    Sound.noise({ d: 0.07, v: 0.18, type: 'bandpass', f: 1800, q: 2, at: 0.02 });
+  },
+  civilian() {
+    Sound.tone({ f: 110, d: 0.9, type: 'square', v: 0.16, sus: true });
+    Sound.tone({ f: 116.5, d: 0.9, type: 'sawtooth', v: 0.14, sus: true });
+    Sound.tone({ f: 55, d: 0.9, type: 'sine', v: 0.3, sus: true });
+  },
+  tick() { Sound.tone({ f: 1600, d: 0.05, type: 'square', v: 0.07 }); },
+  gameOver() {
+    [523.25, 415.3, 349.23, 261.63].forEach((f, i) =>
+      Sound.tone({ f, d: i === 3 ? 0.6 : 0.2, type: 'triangle', v: 0.25, at: i * 0.17, sus: true }));
+  },
+  levelUp() {
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => Sound.tone({ f, d: 0.12, type: 'square', v: 0.06, at: i * 0.06 }));
+  },
+  start() {
+    [392, 523.25, 659.25, 783.99].forEach((f, i) => Sound.tone({ f, d: 0.14, type: 'triangle', v: 0.18, at: i * 0.08 }));
+  },
+  ui() { Sound.tone({ f: 880, d: 0.05, type: 'triangle', v: 0.12 }); },
+  // --- ammo & reload ---
+  emptyClick() {
+    Sound.noise({ d: 0.025, v: 0.5, type: 'highpass', f: 4000 });
+    Sound.tone({ f: 2200, f2: 1400, d: 0.03, type: 'square', v: 0.05 });
+  },
+  magOut() {
+    Sound.noise({ d: 0.06, v: 0.35, type: 'bandpass', f: 1400, q: 3 });
+    Sound.tone({ f: 420, f2: 300, d: 0.06, type: 'triangle', v: 0.15 });
+  },
+  magIn() {
+    Sound.noise({ d: 0.05, v: 0.45, type: 'bandpass', f: 900, q: 3 });
+    Sound.tone({ f: 260, f2: 180, d: 0.07, type: 'square', v: 0.08 });
+  },
+  rack() {                                        // slide racked: the "gun is ready" click-clack
+    Sound.noise({ d: 0.04, v: 0.45, type: 'highpass', f: 2500 });
+    Sound.tone({ f: 1700, d: 0.03, type: 'square', v: 0.06 });
+    Sound.noise({ d: 0.05, v: 0.5, type: 'bandpass', f: 2000, q: 2, at: 0.07 });
+    Sound.tone({ f: 900, d: 0.05, type: 'square', v: 0.07, at: 0.07 });
+  },
+  ammo() {
+    Sound.tone({ f: 1568, d: 0.08, type: 'triangle', v: 0.12 });
+    Sound.tone({ f: 2093, d: 0.1, type: 'triangle', v: 0.1, at: 0.06 });
+  },
+  // --- bomb robber ---
+  beep(urgency) { Sound.tone({ f: 1500 + urgency * 900, d: 0.07, type: 'square', v: 0.1 }); },
+  bombHit() {
+    Sound.tone({ f: 300, f2: 180, d: 0.08, type: 'square', v: 0.12 });
+    Sound.noise({ d: 0.06, v: 0.4, type: 'bandpass', f: 1200, q: 1.5 });
+  },
+  defused() {
+    [784, 988, 1175, 1568].forEach((f, i) => Sound.tone({ f, d: 0.16, type: 'triangle', v: 0.2, at: 0.05 + i * 0.07 }));
+  },
+  explosion() {
+    Sound.noise({ d: 1.4, v: 1.0, type: 'lowpass', f: 2400, f2: 60 });
+    Sound.noise({ d: 0.12, v: 0.6, type: 'highpass', f: 1500 });
+    Sound.tone({ f: 90, f2: 28, d: 1.1, type: 'sine', v: 1.0 });
+    Sound.tone({ f: 55, f2: 30, d: 0.8, type: 'triangle', v: 0.5, at: 0.05 });
+  },
+  // --- berserk ---
+  berserk() {
+    Sound.tone({ f: 110, f2: 880, d: 0.7, type: 'sawtooth', v: 0.18, sus: true });
+    Sound.tone({ f: 165, f2: 1320, d: 0.7, type: 'square', v: 0.08, sus: true });
+    Sound.noise({ d: 0.9, v: 0.5, type: 'bandpass', f: 400, f2: 3000, q: 1 });
+    [220, 277.18, 329.63, 440].forEach((f, i) =>
+      Sound.tone({ f, d: 0.5, type: 'sawtooth', v: 0.08, at: 0.55 + i * 0.03, sus: true }));
+  },
+  mgShot() {
+    Sound.noise({ d: 0.06, v: 0.55, type: 'lowpass', f: 4500, f2: 600 });
+    Sound.tone({ f: 140, f2: 55, d: 0.05, type: 'sine', v: 0.5 });
+  },
+  berserkEnd() { Sound.tone({ f: 660, f2: 220, d: 0.4, type: 'sawtooth', v: 0.1 }); }
+};
+
+/* =====================================================================
+   SPAWNER & DIFFICULTY
+   ===================================================================== */
+function difficulty() {
+  if (S.mode === 'menu') return { visible: 1.8, interval: 0.85, maxActive: 3, civChance: 0.35, bombChance: 0, burstChance: 0, burstMax: 2 };
+  // Berserk: robbers only, fast and plenty of them.
+  if (S.berserk) return { visible: 1.0, interval: 0.16, maxActive: MAX_ON_SCREEN, civChance: 0, bombChance: 0, burstChance: 0.4, burstMax: 3 };
+  const lvl = S.level;                                    // +1 level every HITS_PER_LEVEL robbers
+  return {
+    visible: Math.max(0.45, 1.1 * Math.pow(0.92, lvl)),   // -8% per level, floor 0.45s
+    interval: Math.max(0.25, 0.8 * Math.pow(0.87, lvl)),  // -13% per level, floor 0.25s
+    maxActive: Math.min(MAX_ON_SCREEN, 1 + lvl),
+    civChance: Math.min(0.35, 0.3 + 0.01 * lvl),
+    bombChance: Math.min(0.15, 0.02 + 0.015 * lvl),       // 2% at level 1, +1.5% per level
+    burstChance: lvl < 1 ? 0 : Math.min(0.5, 0.18 + 0.05 * (lvl - 1)),
+    burstMax: lvl >= 4 ? 3 : 2
+  };
+}
+const isActive = c => c.state === 'rising' || c.state === 'up';
+const activeCount = () => chars.reduce((n, c) => n + (isActive(c) ? 1 : 0), 0);
+const freeSpots = () => SPOTS.filter(sp => !sp.char && sp.cooldown <= 0);
+const bombOnScreen = () => chars.some(c => c.bomb && isActive(c));
+
+function makeLook(type, bomb) {
+  if (type === 'robber') {
+    return { robber: true, bomb, cloth: pick(bomb ? BOMB_CLOTH : ROBBER_CLOTH), skin: pick(SKINS), flip: Math.random() < 0.5 };
+  }
+  return {
+    robber: false, shirt: pick(CIV_SHIRTS), tie: pick(TIES), skin: pick(SKINS), hair: pick(HAIRS),
+    hairStyle: pick(['short', 'long', 'bun', 'bald', 'curly']),
+    glasses: Math.random() < 0.3, briefcase: Math.random() < 0.5, flip: Math.random() < 0.5
+  };
+}
+
+function spawnCharacter(type, bomb = false) {
+  const free = freeSpots();
+  if (!free.length) return null;
+  const spot = pick(free), d = difficulty();
+  const c = {
+    id: nextId++, type, spot, state: 'rising', t: 0, pop: 0, angle: 0,
+    flash: 0, flashColor: '#fff', fallDir: 1, born: S.clock, safe: false,
+    visible: bomb ? Infinity : d.visible * rand(0.9, 1.15) * (type === 'civilian' ? 1.1 : 1),
+    look: makeLook(type, bomb),
+    bomb, hp: bomb ? BOMB_HP : 1, bombT: BOMB_T, beepT: 0.15, beepFlash: 0, wobble: 0
+  };
+  spot.char = c;
+  chars.push(c);
+  if (type === 'robber') S.drought = 0;
+  return c;
+}
+// Regular spawn: maybe a bomb robber (rare, one at a time), otherwise robber/civilian by chance.
+function spawnRolled(d) {
+  if (d.bombChance > 0 && !bombOnScreen() && Math.random() < d.bombChance) return spawnCharacter('robber', true);
+  return spawnCharacter(Math.random() < d.civChance ? 'civilian' : 'robber');
+}
+
+// Duck a character from wherever it is in its pop-up, without a visual jump.
+function duckNow(c) {
+  if (!isActive(c)) return;
+  c.t = DUCK_T * Math.sqrt(clamp(1 - Math.min(1, c.pop), 0, 1));
+  c.state = 'ducking';
+}
+
+// A burst always opens with a robber, so a burst is never civilians only.
+function startBurst(n, d) {
+  if (!spawnCharacter('robber')) return;
+  for (let i = 1; i < n; i++) {
+    S.burstQueue.push({ delay: i * rand(0.05, 0.1), type: Math.random() < d.civChance ? 'civilian' : 'robber' });
+  }
+}
+// Burst wave: 3-4 characters within half a second. Opens with a robber, at most half civilians.
+function startWave(d) {
+  const room = Math.min(MAX_ON_SCREEN - activeCount(), freeSpots().length);
+  if (room < 3) return false;
+  const n = Math.min(room, Math.random() < 0.5 ? 3 : 4);
+  if (!spawnCharacter('robber')) return false;
+  let civs = 0;
+  for (let i = 1; i < n; i++) {
+    const civ = Math.random() < d.civChance && civs < Math.floor(n / 2);
+    if (civ) civs++;
+    S.burstQueue.push({ delay: (i / (n - 1)) * rand(0.32, 0.45), type: civ ? 'civilian' : 'robber' });
+  }
+  addPopup(640, 190, 'INCOMING!', '#ff7a4a', 30);
+  return true;
+}
+
+// Guarantee a robber shows up if none has been visible for a while.
+function forceRobber() {
+  const active = chars.filter(isActive);
+  if (active.length >= MAX_ON_SCREEN) {
+    const civ = active.filter(c => c.type === 'civilian' && c.state === 'up').sort((a, b) => a.born - b.born)[0];
+    if (civ) duckNow(civ);
+    return;
+  }
+  spawnCharacter('robber');
+}
+
+function updateSpawner(dt) {
+  const d = difficulty();
+
+  for (let i = S.burstQueue.length - 1; i >= 0; i--) {
+    const b = S.burstQueue[i];
+    b.delay -= dt;
+    if (b.delay <= 0) {
+      S.burstQueue.splice(i, 1);
+      if (activeCount() < MAX_ON_SCREEN) spawnCharacter(S.berserk ? 'robber' : b.type);
+    }
+  }
+
+  let robberUp = false;
+  for (const c of chars) if (c.type === 'robber' && isActive(c)) { robberUp = true; break; }
+  S.drought = robberUp ? 0 : S.drought + dt;
+  if (S.drought >= DROUGHT_LIMIT) forceRobber();
+
+  // Burst waves: on every 3rd level-up, plus now and then from level 5.
+  if (S.mode === 'playing' && !S.berserk) {
+    if (S.level >= 4) {
+      S.waveTimer -= dt;
+      if (S.waveTimer <= 0) { S.pendingWave = true; S.waveTimer = rand(12, 18); }
+    }
+    if (S.pendingWave && S.burstQueue.length === 0 && startWave(d)) {
+      S.pendingWave = false;
+      S.spawnTimer = Math.max(S.spawnTimer, d.interval * 1.5);
+      return;
+    }
+  }
+
+  S.spawnTimer -= dt;
+  if (S.spawnTimer <= 0 && S.burstQueue.length === 0) {
+    const active = activeCount(), free = freeSpots().length;
+    if (active < d.maxActive && free > 0) {
+      const room = Math.min(MAX_ON_SCREEN - active, free);
+      if (d.burstChance > 0 && room >= 2 && Math.random() < d.burstChance) {
+        startBurst(Math.min(room, d.burstMax === 3 && Math.random() < 0.5 ? 3 : 2), d);
+      } else {
+        spawnRolled(d);
+      }
+      S.spawnTimer = d.interval * rand(0.8, 1.2);
+    }
+  }
+}
+
+/* =====================================================================
+   HIT TESTING
+   ===================================================================== */
+const charTop = c => c.spot.coverTop - CHAR_H * c.spot.s * Math.max(0, c.pop);
+const hittable = c => (c.state === 'rising' || c.state === 'up' || c.state === 'ducking') && c.pop > 0.3
+  && !c.safe && !(S.berserk && c.type === 'civilian');
+
+function localPoint(c, x, y) {
+  const s = c.spot.s, top = charTop(c);
+  let lx = (x - c.spot.x) / s;
+  if (c.look.flip) lx = -lx;
+  return { lx, ly: (y - top) / s, vis: (c.spot.coverTop - top) / s };
+}
+// Tight hitbox matching the drawn sprite. Civilians only ever use this one.
+function strictHit(c, x, y) {
+  if (y > c.spot.coverTop) return false;
+  const { lx, ly, vis } = localPoint(c, x, y);
+  if (c.type === 'robber') {
+    if (Math.abs(lx) <= 46 && ly >= -8 && ly <= vis) return true;            // body + head
+    if (lx >= 30 && lx <= 90 && ly >= -8 && ly <= Math.min(72, vis)) return true;   // money bag / bomb
+    if (lx >= -74 && lx <= -30 && ly >= 12 && ly <= Math.min(110, vis)) return true; // pistol arm
+    return false;
+  }
+  if (Math.abs(lx) <= 24 && ly >= 2 && ly <= 50) return true;                // head
+  return Math.abs(lx) <= 48 && ly >= 46 && ly <= vis;                       // torso
+}
+// Generous hitbox (sprite + padding) — only for robbers, so near-misses never punish the player.
+function paddedHit(c, x, y, pad) {
+  if (c.type !== 'robber' || y > c.spot.coverTop + pad * 0.4) return false;
+  const { lx, ly, vis } = localPoint(c, x, y), p = pad / c.spot.s;
+  return lx >= -74 - p && lx <= 90 + p && ly >= -8 - p && ly <= vis + p * 0.4;
+}
+function pickTarget(x, y, touch) {
+  const list = chars.filter(hittable).sort((a, b) => b.spot.row - a.spot.row); // front first
+  for (const c of list) if (strictHit(c, x, y)) return c;
+  // Touch padding: ~16 CSS px around robbers whatever the screen size (fingers are big, phones small).
+  const pad = touch ? Math.max(24, 16 / view.cssScale) : 12;
+  let best = null, bestD = Infinity;
+  for (const c of list) {
+    if (!paddedHit(c, x, y, pad)) continue;
+    const d = Math.hypot(x - c.spot.x, y - (charTop(c) + c.spot.coverTop) / 2);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best;
+}
+function isHeadshot(c, x, y) {
+  const s = c.spot.s;
+  return (y - charTop(c)) <= CHAR_H * s * 0.3 && Math.abs(x - c.spot.x) <= 34 * s + 8;
+}
+
+/* =====================================================================
+   GAMEPLAY ACTIONS — shooting, ammo & reload
+   ===================================================================== */
+function muzzlePos() {
+  const a = gun.angle, c = Math.cos(a), s = Math.sin(a), len = S.berserk ? 318 : 256;
+  return { x: GUN_PIVOT.x + c * len + s * 8, y: GUN_PIVOT.y + s * len - c * 8 };
+}
+function aimGunAt(x, y) {
+  gun.angle = clamp(Math.atan2(y - GUN_PIVOT.y, x - GUN_PIVOT.x), GUN_MIN_ANGLE, GUN_MAX_ANGLE);
+}
+
+function shoot(x, y, touch) {
+  if (S.inputGrace > 0) return;
+  if (S.berserk) {                                  // minigun: first round fires on press, the rest while held
+    fireMinigun(x, y, touch);
+    S.mgCooldown = 1 / MINIGUN_RATE;
+    return;
+  }
+  if (S.reloading || S.ammo <= 0) { emptyClick(); startReload(); return; }
+  if (S.clock - S.lastShot < SHOT_COOLDOWN) return;
+  S.lastShot = S.clock;
+  S.shots++;
+  S.ammo--;
+  aimGunAt(x, y);
+  gun.recoil = 1; gun.flash = 0.07; gun.flashRot = Math.random() * TAU;
+  const m = muzzlePos();
+  tracers.push({ x1: m.x, y1: m.y, x2: x, y2: y, t: 0 });
+  Sound.play('shot');
+
+  const target = pickTarget(x, y, touch);
+  if (!target) onMiss(x, y);
+  else if (target.type === 'civilian') { onCivilianHit(target, x, y); return; }
+  else {
+    S.landed++;
+    const head = isHeadshot(target, x, y);
+    if (head) refundBullet(x, y);                   // headshots cost no ammo
+    if (target.bomb) onBombHit(target, x, y, head);
+    else onRobberKill(target, x, y, head);
+  }
+  if (S.ammo <= 0 && S.mode === 'playing' && !S.berserk) startReload();   // auto-reload on empty
+}
+
+function refundBullet(x, y) {
+  S.ammo = Math.min(MAG_SIZE, S.ammo + 1);
+  S.ammoPulse = 1;
+  addPopup(x + 70, y + 4, '+AMMO', '#7fe0ff', 20, 0.08);
+  Sound.play('ammo');
+}
+function emptyClick() {
+  if (S.clock - S.lastShot < SHOT_COOLDOWN) return;
+  S.lastShot = S.clock;
+  S.reloadNag = 1;
+  Sound.play('emptyClick');
+}
+function startReload() {
+  if (S.reloading || S.berserk || S.ammo >= MAG_SIZE || S.mode !== 'playing') return;
+  S.reloading = true; S.reloadT = 0; S.reloadStage = 0;
+}
+// Runs only while playing, so pausing freezes the reload too.
+function updateReload(dt) {
+  if (!S.reloading) return;
+  S.reloadT += dt;
+  const p = S.reloadT / RELOAD_T;
+  if (S.reloadStage === 0 && p >= 0.18) { S.reloadStage = 1; Sound.play('magOut'); }
+  if (S.reloadStage === 1 && p >= 0.55) { S.reloadStage = 2; Sound.play('magIn'); }
+  if (p >= 1) {
+    S.reloading = false; S.reloadT = 0;
+    S.ammo = MAG_SIZE; S.ammoPulse = 1;
+    Sound.play('rack');
+  }
+}
+
+function addTime(add) {
+  const before = S.time;
+  S.time = clamp(S.time + add, 0, TIME_MAX);
+  if (add < 0) timeFloaters.push({ text: `${add}s`, color: '#ff5050', t: 0 });
+  else if (S.time > before + 0.001) timeFloaters.push({ text: `+${add}s`, color: '#4cf08c', t: 0 });
+  else timeFloaters.push({ text: 'MAX', color: '#ffcf4a', t: 0 });
+}
+
+function checkLevelUp() {
+  const lvl = Math.floor(S.hits / HITS_PER_LEVEL);
+  if (lvl <= S.level) return;
+  S.level = lvl; S.levelPulse = 1;
+  S.banner = { text: 'LEVEL UP!', sub: `LEVEL ${lvl + 1}`, t: 0 };
+  Sound.play('levelUp');
+  if ((lvl + 1) % 3 === 0) S.pendingWave = true;    // a burst wave every 3 levels
+}
+
+// A robber goes down (regular kill, berserk kill or a defused bomb robber).
+function onRobberKill(c, x, y, head, bombKill = false) {
+  S.hits++;
+  let pts, add;
+  if (S.berserk && !bombKill) {
+    pts = 100 * 2;                                   // berserk: flat +100 with a x2 bonus
+    add = BERSERK_TIME_HIT;
+    addPopup(x, y - 8, `+${pts}`, '#ff8a5c', 30);
+  } else {
+    S.streak++;
+    const mult = Math.min(5, 1 + Math.floor(S.streak / 3));
+    const multUp = mult > S.mult;
+    S.mult = mult;
+    pts = (bombKill ? BOMB_POINTS : 100 + (head ? 50 : 0)) * mult;
+    add = bombKill ? BOMB_TIME_BONUS : head ? TIME_HEAD : TIME_HIT;
+    addPopup(x, y - 8, `+${pts}`, head ? '#ffe066' : '#fff3c4', 32 + mult * 3);
+    if (multUp) { S.comboPulse = 1; addPopup(x, y - (head ? 84 : 48), `COMBO x${mult}!`, '#ffb02e', 26, 0.1); }
+  }
+  if (head) addPopup(x, y - 46, 'HEADSHOT!', '#ff6b4a', 30, 0.05);
+  S.score += pts;
+  addTime(add);
+
+  burst(x, y, 14, 'spark', ['#fff3b0', '#ffd23f', '#ff9a3c'], 420);
+  burst(x, y, 8, 'bill', ['#7ccf6a', '#8fdc7c'], 260);
+  c.state = 'hit'; c.t = 0; c.flash = 1; c.flashColor = '#ffffff';
+  c.fallDir = x < c.spot.x ? 1 : -1;
+  Sound.play('hit', head);
+  buzz(18);
+
+  if (!S.berserk) {
+    S.killStreak++;
+    S.bestKillStreak = Math.max(S.bestKillStreak, S.killStreak);
+    if (S.killStreak >= BERSERK_STREAK) startBerserk();
+  }
+  checkLevelUp();
+}
+
+/* =====================================================================
+   GAMEPLAY ACTIONS — bomb robber
+   ===================================================================== */
+// Non-lethal hits on the bomb robber are neither misses nor kills: no combo/streak change.
+function onBombHit(c, x, y, head) {
+  c.hp--;
+  c.flash = 1; c.flashColor = '#ffffff'; c.wobble = 1;
+  burst(x, y, 8, 'spark', ['#fff3b0', '#ffd23f', '#ff9a3c'], 360);
+  if (c.hp > 0) {
+    if (head) addPopup(x, y - 40, 'HEADSHOT!', '#ff6b4a', 24);
+    addPopup(x, y - 8, `HIT ${BOMB_HP - c.hp}/${BOMB_HP}`, '#ffb020', 24);
+    Sound.play('bombHit');
+    buzz(12);
+    return;
+  }
+  S.bombsDefused++;
+  addPopup(c.spot.x, charTop(c) - 70, 'BOMB DEFUSED!', '#ffd23f', 50, 0.05);
+  Sound.play('defused');
+  onRobberKill(c, x, y, head, true);
+}
+
+function explodeBomb(c) {
+  const s = c.spot.s, dir = c.look.flip ? -1 : 1;
+  const x = c.spot.x + dir * 62 * s, y = charTop(c) + 40 * s;
+  explosions.push({ x, y, t: 0, r: 120 + 70 * s, seed: Math.random() * TAU });
+  burst(x, y, 34, 'spark', ['#fff3b0', '#ffd23f', '#ff7a1a', '#ff3b1a'], 900);
+  burst(x, y, 16, 'smoke', ['#3a3532', '#55504a', '#2a2624'], 260);
+  burst(x, y, 10, 'bill', ['#7ccf6a', '#8fdc7c'], 520);
+  S.score = Math.max(0, S.score - BOMB_PENALTY);
+  addTime(-BOMB_TIME_PENALTY);
+  if (S.mult > 1) addPopup(x, y - 120, 'COMBO LOST', '#bdbdbd', 22, 0.15);
+  S.streak = 0; S.mult = 1;
+  addPopup(x, y - 20, `-${BOMB_PENALTY}`, '#ff4040', 44, 0.05);
+  addPopup(x, y - 70, 'BOOM!', '#ffb020', 58);
+  S.shake = 34; S.boomFlash = 1;
+  S.bombsExploded++;
+  Sound.play('explosion');
+  buzz([200, 80, 300]);
+  if (c.spot.char === c) { c.spot.char = null; c.spot.cooldown = 1.2; }
+}
+
+/* =====================================================================
+   GAMEPLAY ACTIONS — berserk mode
+   ===================================================================== */
+function startBerserk() {
+  Object.assign(S, { berserk: true, berserkT: BERSERK_T, berserkAge: 0, mgCooldown: 0, reloading: false, reloadT: 0 });
+  S.berserkCount++;
+  S.shake = Math.max(S.shake, 22);
+  S.redFlash = Math.max(S.redFlash, 0.6);
+  // Get civilians out of the line of fire; only robbers from now on.
+  for (const c of chars) if (c.type === 'civilian') { duckNow(c); c.safe = true; }
+  for (const b of S.burstQueue) b.type = 'robber';
+  S.spawnTimer = 0.05;
+  Sound.play('berserk');
+  buzz([60, 40, 60, 40, 160]);
+  updateHudButtons();
+}
+function endBerserk() {
+  Object.assign(S, { berserk: false, berserkT: 0, ammo: MAG_SIZE, ammoPulse: 1, killStreak: 0, spawnTimer: 0.6 });
+  hold.down = false;
+  Sound.setMinigun(false);
+  Sound.play('berserkEnd');
+  addPopup(640, 200, 'BERSERK OVER', '#ffb0a0', 30);
+  updateHudButtons();
+}
+// Runs only while playing, so pausing freezes the berserk timer too.
+function updateBerserk(dt) {
+  if (!S.berserk) return;
+  S.berserkT -= dt;
+  S.berserkAge += dt;
+  if (hold.down) {
+    S.mgCooldown -= dt;
+    while (S.mgCooldown <= 0 && S.berserk && S.mode === 'playing') {
+      fireMinigun(aim.x, aim.y, !aim.mouse);
+      S.mgCooldown += 1 / MINIGUN_RATE;
+    }
+  } else {
+    S.mgCooldown = 0;
+  }
+  if (S.berserk && S.berserkT <= 0) endBerserk();
+}
+// One minigun round: slight spread, unlimited ammo, misses cost nothing.
+function fireMinigun(x, y, touch) {
+  const sx = x + rand(-10, 10), sy = y + rand(-10, 10);
+  aimGunAt(x, y);
+  gun.recoil = Math.max(gun.recoil, 0.5); gun.flash = 0.07; gun.flashRot = Math.random() * TAU;
+  const m = muzzlePos();
+  tracers.push({ x1: m.x, y1: m.y, x2: sx, y2: sy, t: 0 });
+  Sound.play('mgShot');
+  const target = pickTarget(sx, sy, touch);       // civilians are never hittable in berserk
+  if (!target || target.type !== 'robber') {
+    if (Math.random() < 0.3) { holes.push({ x: sx, y: sy, age: 0, rot: Math.random() * TAU }); if (holes.length > 30) holes.shift(); }
+    burst(sx, sy, 2, 'dust', ['#b9ab8f', '#8d806a'], 140);
+    return;
+  }
+  const head = isHeadshot(target, sx, sy);
+  if (target.bomb) onBombHit(target, sx, sy, head);
+  else onRobberKill(target, sx, sy, head);
+}
+
+/* =====================================================================
+   GAMEPLAY ACTIONS — misses & game end
+   ===================================================================== */
+function onCivilianHit(c, x, y) {
+  c.state = 'shot'; c.t = 0; c.flash = 1; c.flashColor = '#ff2a2a';
+  S.streak = 0; S.mult = 1;
+  S.redFlash = 1; S.shake = 24;
+  S.burstQueue.length = 0;
+  S.reloading = false;
+  S.mode = 'dying'; S.dyingT = S.dyingTotal = 1.7; S.reason = 'civilian';
+  hold.down = false;
+  Sound.setMinigun(false);
+  burst(x, y, 22, 'spark', ['#ff4040', '#ffffff', '#ff9090'], 460);
+  addPopup(x, y - 10, 'NO!', '#ff4040', 40);
+  Sound.play('civilian');
+  buzz([120, 60, 220]);
+  updateHudButtons();
+}
+
+function onMiss(x, y) {
+  holes.push({ x, y, age: 0, rot: Math.random() * TAU });
+  if (holes.length > 30) holes.shift();
+  burst(x, y, 7, 'dust', ['#b9ab8f', '#8d806a', '#d8ccb2'], 160);
+  burst(x, y, 4, 'spark', ['#fff3b0', '#ffd23f'], 260);
+  if (S.mult > 1) addPopup(x, y - 20, 'COMBO LOST', '#bdbdbd', 20);
+  else if (S.killStreak >= 5) addPopup(x, y - 20, 'STREAK LOST', '#bdbdbd', 20);
+  S.streak = 0; S.mult = 1; S.killStreak = 0;
+  Sound.play('miss');
+}
+
+function timeUp() {
+  S.mode = 'dying'; S.dyingT = S.dyingTotal = 1.8; S.reason = 'time';
+  S.shake = 16;
+  S.burstQueue.length = 0;
+  S.reloading = false;
+  hold.down = false;
+  Sound.setMinigun(false);
+  Sound.play('gameOver');
+  updateHudButtons();
+}
+
+function endGame() {
+  S.mode = 'over';
+  if (S.score > S.highScore) {
+    S.highScore = S.score; S.newHigh = true;
+    store.set(HS_KEY, String(S.score));
+  }
+  if (S.reason === 'civilian') Sound.play('gameOver');
+  UI.showGameOver();
+}
+
+/* =====================================================================
+   EFFECTS (particles, popups, holes)
+   ===================================================================== */
+function burst(x, y, n, kind, colors, speed) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU, sp = speed * rand(0.35, 1);
+    particles.push({
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - (kind === 'bill' ? 160 : 60),
+      life: 0,
+      max: kind === 'bill' ? rand(0.9, 1.4) : kind === 'smoke' ? rand(0.9, 1.6) : rand(0.35, 0.7),
+      size: kind === 'smoke' ? rand(14, 26) : kind === 'dust' ? rand(3, 6) : rand(2, 4.5),
+      color: pick(colors), kind, rot: Math.random() * TAU, vr: rand(-9, 9),
+      g: kind === 'smoke' ? -60 : kind === 'dust' ? 120 : 700
+    });
+  }
+  if (particles.length > 400) particles.splice(0, particles.length - 400);
+}
+// Haptic feedback on phones that support it (Android); silently ignored elsewhere.
+function buzz(pattern) {
+  if (!view.touch || Sound.muted || !navigator.vibrate) return;
+  if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;   // browsers block it before a real tap
+  try { navigator.vibrate(pattern); } catch (e) { /* not allowed */ }
+}
+function addPopup(x, y, text, color, size, delay = 0) {
+  size *= view.uiK;
+  popups.push({ x: clamp(x, 80, W - 80), y: Math.max(100, y), text, color, size, t: -delay, max: 0.95 });
+  if (popups.length > 40) popups.shift();
+}
+
+/* =====================================================================
+   UPDATE
+   ===================================================================== */
+function updateChars(dt) {
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const c = chars[i];
+    c.t += dt;
+    if (c.flash > 0) c.flash = Math.max(0, c.flash - dt * 4);
+    if (c.wobble > 0) c.wobble = Math.max(0, c.wobble - dt * 5);
+    if (c.beepFlash > 0) c.beepFlash = Math.max(0, c.beepFlash - dt * 6);
+    let done = false;
+    switch (c.state) {
+      case 'rising':
+        c.pop = easeOutBack(Math.min(1, c.t / RISE_T));
+        if (c.t >= RISE_T) { c.state = 'up'; c.t = 0; c.pop = 1; }
+        break;
+      case 'up':
+        c.pop = 1;
+        if (c.t >= c.visible) { c.state = 'ducking'; c.t = 0; }
+        break;
+      case 'ducking':
+        c.pop = 1 - easeInQuad(Math.min(1, c.t / DUCK_T));
+        if (c.t >= DUCK_T) done = true;
+        break;
+      case 'hit': {
+        const k = Math.min(1, c.t / HIT_T);
+        c.angle = c.fallDir * 0.55 * easeOutCubic(k);
+        c.pop = c.t < 0.12
+          ? 1 + 0.06 * Math.sin((c.t / 0.12) * Math.PI)
+          : Math.max(0, 1 - easeInCubic((c.t - 0.12) / (HIT_T - 0.12)));
+        if (c.t >= HIT_T) done = true;
+        break;
+      }
+      case 'shot':
+        c.pop = 1;
+        c.angle = Math.sin(c.t * 30) * 0.04 * Math.max(0, 1 - c.t * 2);
+        break;
+    }
+    // Bomb fuse: only burns while actually playing (frozen when paused or after game over).
+    if (c.bomb && isActive(c) && S.mode === 'playing') {
+      c.bombT -= dt;
+      c.beepT -= dt;
+      if (c.beepT <= 0) {
+        Sound.play('beep', 1 - Math.max(0, c.bombT) / BOMB_T);
+        c.beepFlash = 1;
+        c.beepT = 0.1 + 0.8 * Math.pow(Math.max(0, c.bombT) / BOMB_T, 1.3);   // beeps speed up
+      }
+      if (c.bombT <= 0) { explodeBomb(c); done = true; }
+    }
+    if (done) {
+      if (c.spot.char === c) { c.spot.char = null; c.spot.cooldown = 0.3; }
+      chars.splice(i, 1);
+    }
+  }
+}
+
+function updateEffects(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life += dt;
+    if (p.life >= p.max) { particles.splice(i, 1); continue; }
+    if (p.kind === 'bill') {
+      p.vx *= Math.pow(0.25, dt);
+      p.vy = p.vy * Math.pow(0.35, dt) + 240 * dt;
+      p.x += (p.vx + Math.sin(p.life * 9 + p.rot) * 40) * dt;
+      p.y += p.vy * dt;
+      p.rot += p.vr * dt;
+    } else {
+      p.vx *= Math.pow(0.08, dt); p.vy *= Math.pow(0.08, dt);
+      p.vy += p.g * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+    }
+  }
+  for (let i = popups.length - 1; i >= 0; i--) { popups[i].t += dt; if (popups[i].t >= popups[i].max) popups.splice(i, 1); }
+  for (let i = timeFloaters.length - 1; i >= 0; i--) { timeFloaters[i].t += dt; if (timeFloaters[i].t >= 1) timeFloaters.splice(i, 1); }
+  for (let i = holes.length - 1; i >= 0; i--) { holes[i].age += dt; if (holes[i].age >= 4) holes.splice(i, 1); }
+  for (let i = tracers.length - 1; i >= 0; i--) { tracers[i].t += dt; if (tracers[i].t >= 0.07) tracers.splice(i, 1); }
+  for (let i = explosions.length - 1; i >= 0; i--) { explosions[i].t += dt; if (explosions[i].t >= 1) explosions.splice(i, 1); }
+
+  gun.recoil = Math.max(0, gun.recoil - dt * 7);
+  gun.flash = Math.max(0, gun.flash - dt);
+  S.shake = Math.max(0, S.shake - dt * 28);
+  S.redFlash = Math.max(0, S.redFlash - dt * 1.2);
+  S.boomFlash = Math.max(0, S.boomFlash - dt * 2.5);
+  S.comboPulse = Math.max(0, S.comboPulse - dt * 3);
+  S.levelPulse = Math.max(0, S.levelPulse - dt * 1.5);
+  S.ammoPulse = Math.max(0, S.ammoPulse - dt * 3);
+  S.reloadNag = Math.max(0, S.reloadNag - dt * 1.5);
+  // minigun barrels spin up while firing and wind down after
+  S.spinSpeed += ((hold.down && S.berserk ? 1 : 0.12) - S.spinSpeed) * Math.min(1, dt * 6);
+  S.spin = (S.spin + dt * 45 * S.spinSpeed) % TAU;
+  if (S.banner) { S.banner.t += dt; if (S.banner.t > 1.4) S.banner = null; }
+  if (aim.tapT > 0) aim.tapT -= dt;
+  if (hold.down && !aim.mouse) aim.tapT = 0.4;      // keep the touch crosshair visible while held
+
+  S.shownScore += (S.score - S.shownScore) * Math.min(1, dt * 10);
+  if (Math.abs(S.score - S.shownScore) < 1) S.shownScore = S.score;
+
+  if (S.mode === 'menu') {              // idle sweep for the attract screen
+    aim.x = 640 + Math.sin(S.clock * 0.8) * 420;
+    aim.y = 330 + Math.cos(S.clock * 0.5) * 60;
+  }
+  if (S.mode !== 'dying' && S.mode !== 'over') aimGunAt(aim.x, aim.y);
+}
+
+function update(dt) {
+  if (S.mode === 'paused') return;
+  S.clock += dt;
+  if (S.inputGrace > 0) S.inputGrace -= dt;
+  for (const sp of SPOTS) if (sp.cooldown > 0) sp.cooldown -= dt;
+
+  if (S.mode === 'playing') {
+    const prevCeil = Math.ceil(S.time);
+    S.time -= dt;
+    if (S.time <= 0) { S.time = 0; timeUp(); }
+    else {
+      if (S.time < 10 && Math.ceil(S.time) < prevCeil) Sound.play('tick');
+      updateReload(dt);
+      updateBerserk(dt);
+      updateSpawner(dt);
+    }
+  } else if (S.mode === 'menu') {
+    updateSpawner(dt);
+  } else if (S.mode === 'dying') {
+    S.dyingT -= dt;
+    if (S.dyingT <= 0) endGame();
+  }
+  updateChars(dt);
+  if (S.mode === 'playing' && S.time <= 0) { S.time = 0; timeUp(); }   // a bomb can empty the clock
+  updateEffects(dt);
+  Sound.setMinigun(S.mode === 'playing' && S.berserk && hold.down);
+}
+
+/* =====================================================================
+   RENDER — scenery
+   ===================================================================== */
+const canvas = $('game');
+const ctx = canvas.getContext('2d');
+const bgCanvas = document.createElement('canvas');
+let scale = 1;
+
+const floorF = y => (y + 260) / 980;                 // perspective factor (vanishing point 640,-260)
+const floorX = (x0, y) => 640 + (x0 - 640) * floorF(y);
+
+function drawFloor(g) {
+  const rows = [452, 472, 495, 522, 554, 592, 638, 692, 760];
+  const step = 150;
+  for (let r = 0; r < rows.length - 1; r++) {
+    const y0 = rows[r], y1 = rows[r + 1];
+    for (let i = -9; i <= 9; i++) {
+      const xa = 640 + (i - 0.5) * step, xb = xa + step;
+      g.beginPath();
+      g.moveTo(floorX(xa, y0), y0); g.lineTo(floorX(xb, y0), y0);
+      g.lineTo(floorX(xb, y1), y1); g.lineTo(floorX(xa, y1), y1);
+      g.closePath();
+      g.fillStyle = ((r + i) & 1) ? '#c4b493' : '#f0e6cf';
+      g.fill();
+    }
+  }
+  const gr = g.createLinearGradient(0, 452, 0, 580);
+  gr.addColorStop(0, 'rgba(60,40,20,0.4)'); gr.addColorStop(1, 'rgba(60,40,20,0)');
+  g.fillStyle = gr; g.fillRect(0, 452, W, 128);
+  // carpet runner to the vault
+  g.beginPath();
+  g.moveTo(floorX(530, 452), 452); g.lineTo(floorX(750, 452), 452);
+  g.lineTo(floorX(750, 720), 720); g.lineTo(floorX(530, 720), 720); g.closePath();
+  g.fillStyle = '#7d1a1f'; g.fill();
+  g.strokeStyle = '#d9a63a'; g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(floorX(545, 452), 452); g.lineTo(floorX(545, 720), 720);
+  g.moveTo(floorX(735, 452), 452); g.lineTo(floorX(735, 720), 720);
+  g.stroke();
+}
+
+function drawPillar(g, x) {
+  const gr = g.createLinearGradient(x - 26, 0, x + 26, 0);
+  gr.addColorStop(0, '#cfc3a8'); gr.addColorStop(0.35, '#fbf5e8'); gr.addColorStop(1, '#b3a584');
+  g.fillStyle = gr; g.fillRect(x - 24, 96, 48, 352);
+  g.strokeStyle = 'rgba(120,100,60,.25)'; g.lineWidth = 2;
+  for (let i = -2; i <= 2; i++) { g.beginPath(); g.moveTo(x + i * 9, 106); g.lineTo(x + i * 9, 432); g.stroke(); }
+  g.fillStyle = '#e9dfc8'; g.fillRect(x - 36, 84, 72, 14);
+  g.fillStyle = '#d4c6a6'; g.fillRect(x - 30, 96, 60, 8);
+  g.fillStyle = '#c4b592'; g.fillRect(x - 30, 432, 60, 8);
+  g.fillStyle = '#e0d4b8'; g.fillRect(x - 34, 438, 68, 14);
+}
+
+function drawDoor(g, x, label, exit) {
+  g.fillStyle = '#5a3a20'; g.fillRect(x - 64, 222, 128, 233);
+  g.fillStyle = '#7a5230'; g.fillRect(x - 64, 222, 128, 6);
+  const gr = g.createLinearGradient(0, 236, 0, 455);
+  gr.addColorStop(0, '#120d0a'); gr.addColorStop(1, '#2c2119');
+  g.fillStyle = gr; g.fillRect(x - 50, 236, 100, 219);
+  g.fillStyle = 'rgba(255,220,150,.05)'; g.fillRect(x - 28, 236, 56, 219);
+  if (exit) {
+    g.fillStyle = '#0f5f2a'; g.beginPath(); rr(g, x - 30, 194, 60, 22, 3); g.fill();
+    drawText(g, label, x, 211, 14, '#c8ffd8', { stroke: false });
+  } else {
+    g.fillStyle = '#c9a24a'; g.beginPath(); rr(g, x - 38, 196, 76, 19, 3); g.fill();
+    drawText(g, label, x, 211, 12, '#3a2a0a', { stroke: false });
+  }
+}
+
+function drawVault(g) {
+  const { x, y, r, R } = VAULT;
+  g.fillStyle = '#5d636b'; g.fillRect(x - 96, 412, 192, 40);       // base plinth
+  g.fillStyle = 'rgba(255,255,255,.15)'; g.fillRect(x - 96, 412, 192, 3);
+  g.fillStyle = 'rgba(40,28,14,.35)'; g.beginPath(); g.arc(x + 6, y + 8, R + 8, 0, TAU); g.fill();
+  let gr = g.createRadialGradient(x - 50, y - 60, 10, x, y, R + 4);
+  gr.addColorStop(0, '#f1f3f5'); gr.addColorStop(0.6, '#9aa1a9'); gr.addColorStop(1, '#596069');
+  g.fillStyle = gr; g.beginPath(); g.arc(x, y, R, 0, TAU); g.fill();
+  g.strokeStyle = '#3e434a'; g.lineWidth = 3; g.stroke();
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * TAU, bx = x + Math.cos(a) * (R - 13), by = y + Math.sin(a) * (R - 13);
+    dot(g, bx, by, 4.5, 4.5, '#5d636b');
+    dot(g, bx - 1, by - 1, 2, 2, '#d7dbe0');
+  }
+  g.save();
+  g.beginPath(); g.arc(x, y, r, 0, TAU); g.clip();
+  gr = g.createRadialGradient(x, y - 20, 10, x, y, r);
+  gr.addColorStop(0, '#3a332b'); gr.addColorStop(1, '#120e0b');
+  g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r);
+  g.strokeStyle = 'rgba(214,170,90,.28)'; g.lineWidth = 1.5;
+  g.fillStyle = 'rgba(214,170,90,.3)';
+  for (let by = y - r; by < y + 60; by += 20) {
+    for (let bx = x - r; bx < x + r; bx += 28) { g.strokeRect(bx + 2, by + 2, 24, 16); g.fillRect(bx + 12, by + 9, 4, 2); }
+  }
+  gr = g.createRadialGradient(x, y, r * 0.55, x, y, r);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.65)');
+  g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r);
+  g.restore();
+  // hinges + open door seen edge-on
+  g.fillStyle = '#4b5058'; g.fillRect(x + R - 8, y - 72, 32, 18); g.fillRect(x + R - 8, y + 54, 32, 18);
+  const dx = x + R + 30;
+  dot(g, dx - 8, y, 26, R - 6, '#4a4f57');
+  gr = g.createLinearGradient(dx - 26, 0, dx + 26, 0);
+  gr.addColorStop(0, '#7d848d'); gr.addColorStop(0.5, '#d2d6db'); gr.addColorStop(1, '#80878f');
+  g.fillStyle = gr; g.beginPath(); g.ellipse(dx, y, 26, R - 6, 0, 0, TAU); g.fill();
+  g.strokeStyle = '#3e434a'; g.lineWidth = 2; g.stroke();
+  g.strokeStyle = '#5a6068'; g.lineWidth = 3;
+  g.beginPath(); g.ellipse(dx + 2, y, 9, 32, 0, 0, TAU); g.stroke();
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI;
+    g.beginPath();
+    g.moveTo(dx + 2 + Math.cos(a) * 9, y + Math.sin(a) * 32);
+    g.lineTo(dx + 2 - Math.cos(a) * 9, y - Math.sin(a) * 32);
+    g.stroke();
+  }
+}
+
+function drawClock(g, cx, cy) {
+  dot(g, cx, cy, 33, 33, '#5a3a20');
+  dot(g, cx, cy, 27, 27, '#fbf7ec');
+  g.strokeStyle = '#3a2a1a'; g.lineCap = 'round';
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * TAU;
+    g.lineWidth = i % 3 ? 1.5 : 3;
+    g.beginPath(); g.moveTo(cx + Math.cos(a) * 22, cy + Math.sin(a) * 22); g.lineTo(cx + Math.cos(a) * 25, cy + Math.sin(a) * 25); g.stroke();
+  }
+  g.lineWidth = 3; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx - 12, cy - 7); g.stroke();
+  g.lineWidth = 2; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + 13, cy - 15); g.stroke();
+  dot(g, cx, cy, 2.5, 2.5, '#b8141c');
+  g.lineCap = 'butt';
+}
+
+function drawWindow(g, x, y, w, h) {
+  g.fillStyle = '#6b4a2a'; g.fillRect(x - 6, y - 6, w + 12, h + 12);
+  const gr = g.createLinearGradient(0, y, 0, y + h);
+  gr.addColorStop(0, '#8fcaf5'); gr.addColorStop(1, '#e4f4ff');
+  g.fillStyle = gr; g.fillRect(x, y, w, h);
+  g.fillStyle = 'rgba(255,255,255,.55)';
+  for (let yy = y + 4; yy < y + h * 0.45; yy += 7) g.fillRect(x, yy, w, 3);
+  g.fillStyle = '#6b4a2a'; g.fillRect(x + w / 2 - 3, y, 6, h); g.fillRect(x, y + h / 2 - 3, w, 6);
+  g.fillStyle = '#8a6440'; g.fillRect(x - 10, y + h + 4, w + 20, 7);
+}
+
+function drawBackground(g) {
+  let gr = g.createLinearGradient(0, 0, 0, 455);
+  gr.addColorStop(0, '#c9b48a'); gr.addColorStop(0.5, '#e6d7b6'); gr.addColorStop(1, '#efe3c8');
+  g.fillStyle = gr; g.fillRect(0, 0, W, 455);
+  for (let x = 0; x < W; x += 160) {
+    g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(x + 12, 100, 136, 256);
+    g.strokeStyle = 'rgba(120,92,52,.25)'; g.lineWidth = 2; g.strokeRect(x + 12, 100, 136, 256);
+  }
+  // crown molding
+  g.fillStyle = '#a88a58'; g.fillRect(0, 64, W, 18);
+  g.fillStyle = '#d9c08e'; g.fillRect(0, 64, W, 4);
+  g.fillStyle = '#7a5f38'; g.fillRect(0, 80, W, 3);
+  g.fillStyle = 'rgba(90,66,36,.35)';
+  for (let x = 6; x < W; x += 22) g.fillRect(x, 70, 10, 8);
+  // wainscot
+  g.fillStyle = '#5b3920'; g.fillRect(0, 372, W, 80);
+  g.fillStyle = '#82562f'; g.fillRect(0, 366, W, 9);
+  g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(0, 366, W, 2);
+  for (let x = 0; x < W; x += 128) {
+    g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 3; g.strokeRect(x + 14, 388, 100, 48);
+    g.strokeStyle = 'rgba(255,220,170,.08)'; g.lineWidth = 1.5; g.strokeRect(x + 17, 391, 94, 42);
+  }
+  g.fillStyle = '#2f1d10'; g.fillRect(0, 448, W, 8);
+
+  drawFloor(g);
+
+  // bank sign
+  g.fillStyle = '#173d2e'; g.beginPath(); rr(g, 450, 92, 380, 46, 6); g.fill();
+  g.strokeStyle = '#d9a63a'; g.lineWidth = 3; g.stroke();
+  drawText(g, '★ FIRST NATIONAL BANK ★', 640, 124, 21, '#ffd66b', { stroke: false });
+
+  drawClock(g, 430, 190);
+  drawWindow(g, 850, 118, 82, 124);
+  drawPillar(g, 300);
+  drawPillar(g, 980);
+  drawDoor(g, 110, 'OFFICE', false);
+  drawDoor(g, 1170, 'EXIT', true);
+  drawVault(g);
+}
+
+function buildBackground() {
+  bgCanvas.width = canvas.width; bgCanvas.height = canvas.height;
+  const g = bgCanvas.getContext('2d');
+  g.setTransform(scale, 0, 0, scale, 0, 0);
+  drawBackground(g);
+}
+
+// Foreground cover pieces, drawn in front of the characters at each spot.
+function drawCover(g, sp) {
+  const x = sp.x;
+  switch (sp.kind) {
+    case 'door': {
+      g.fillStyle = '#7d4f2b'; g.fillRect(x - 50, 390, 100, 62);
+      g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 3; g.strokeRect(x - 40, 402, 80, 40);
+      g.fillStyle = '#a06c3c'; g.fillRect(x - 57, 383, 114, 9);
+      g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(x - 57, 383, 114, 2);
+      dot(g, x + 34, 422, 4, 4, '#e0b84a');
+      break;
+    }
+    case 'vault': {
+      const { y, r } = VAULT;
+      g.save();
+      g.beginPath(); g.arc(x, y, r - 1, 0, TAU); g.clip();
+      g.fillStyle = '#2a2018'; g.fillRect(x - r, 356, 2 * r, 60);
+      const rows = [{ y: 357, h: 15, off: 0 }, { y: 372, h: 15, off: 22 }, { y: 387, h: 17, off: 0 }];
+      for (const row of rows) {
+        const gr = g.createLinearGradient(0, row.y, 0, row.y + row.h);
+        gr.addColorStop(0, '#fff0a0'); gr.addColorStop(0.35, '#f5c542'); gr.addColorStop(1, '#a8740f');
+        g.fillStyle = gr; g.strokeStyle = '#7a5208'; g.lineWidth = 1.2;
+        for (let bx = x - r - 22 + row.off; bx < x + r; bx += 44) {
+          g.beginPath();
+          g.moveTo(bx + 5, row.y); g.lineTo(bx + 39, row.y); g.lineTo(bx + 43, row.y + row.h); g.lineTo(bx + 1, row.y + row.h);
+          g.closePath(); g.fill(); g.stroke();
+        }
+      }
+      g.restore();
+      g.strokeStyle = '#2b2f35'; g.lineWidth = 4;
+      g.beginPath(); g.arc(x, y, r, 0, TAU); g.stroke();
+      break;
+    }
+    case 'counter': {
+      dot(g, x, 601, 122, 8, 'rgba(0,0,0,.22)');
+      g.fillStyle = '#6a4024'; g.fillRect(x - 106, 506, 212, 90);
+      for (let i = -1; i <= 1; i++) {
+        g.strokeStyle = 'rgba(0,0,0,.32)'; g.lineWidth = 3; g.strokeRect(x + i * 70 - 30, 518, 60, 64);
+        g.strokeStyle = 'rgba(255,220,170,.1)'; g.lineWidth = 1.5; g.strokeRect(x + i * 70 - 27, 521, 54, 58);
+      }
+      g.fillStyle = '#3e2414'; g.fillRect(x - 108, 590, 216, 10);
+      const gr = g.createLinearGradient(0, 494, 0, 508);
+      gr.addColorStop(0, '#f8f4ec'); gr.addColorStop(1, '#c9bfae');
+      g.fillStyle = gr; g.fillRect(x - 114, 494, 228, 13);
+      g.fillStyle = 'rgba(0,0,0,.22)'; g.fillRect(x - 114, 505, 228, 3);
+      g.fillStyle = '#d4a940'; g.beginPath(); rr(g, x - 36, 538, 72, 20, 3); g.fill();
+      drawText(g, sp.label, x, 553, 11, '#3a2a0a', { stroke: false });
+      // service bell
+      g.fillStyle = '#e6c25a'; g.beginPath(); g.arc(x - 94, 494, 7, Math.PI, 0); g.fill();
+      g.fillStyle = '#8a6a20'; g.fillRect(x - 103, 493, 18, 3);
+      break;
+    }
+    case 'desk': {
+      dot(g, x, 702, 124, 8, 'rgba(0,0,0,.22)');
+      g.fillStyle = '#4a2c17'; g.fillRect(x - 104, 598, 10, 104); g.fillRect(x + 94, 598, 10, 104);
+      g.fillStyle = '#6e4426'; g.fillRect(x - 100, 598, 200, 80);
+      g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 3;
+      g.strokeRect(x - 88, 610, 80, 56); g.strokeRect(x + 8, 610, 80, 56);
+      dot(g, x - 48, 638, 6, 3, '#d2a74a'); dot(g, x + 48, 638, 6, 3, '#d2a74a');
+      g.fillStyle = '#93603a'; g.fillRect(x - 112, 586, 224, 13);
+      g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(x - 112, 586, 224, 2);
+      // papers + mug
+      g.fillStyle = '#ffffff'; g.fillRect(x - 106, 579, 30, 7);
+      g.fillStyle = '#eeeae0'; g.fillRect(x - 103, 575, 26, 5);
+      g.fillStyle = '#e9e4da'; g.fillRect(x + 80, 568, 15, 18);
+      g.strokeStyle = '#e9e4da'; g.lineWidth = 3; g.beginPath(); g.arc(x + 97, 577, 5, -Math.PI / 2, Math.PI / 2); g.stroke();
+      break;
+    }
+  }
+}
+
+/* =====================================================================
+   RENDER — characters (canvas-drawn, no images)
+   ===================================================================== */
+// Local units: origin = top-centre of the head, y grows down, ~160 units visible when fully up.
+function torsoPath(g) {
+  g.moveTo(-42, 232); g.lineTo(-42, 82);
+  g.quadraticCurveTo(-42, 50, -14, 47); g.lineTo(14, 47);
+  g.quadraticCurveTo(42, 50, 42, 82); g.lineTo(42, 232);
+  g.closePath();
+}
+function drawX(g, x, y, r) {
+  g.strokeStyle = '#111'; g.lineWidth = 2.4; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(x - r, y - r); g.lineTo(x + r, y + r); g.moveTo(x + r, y - r); g.lineTo(x - r, y + r); g.stroke();
+}
+
+// o.mode: 'fill' (normal), 'outline' (coloured silhouette stroke), 'solid' (flat flash colour)
+function drawPerson(g, L, o) {
+  const FILL = o.mode === 'fill';
+  const P = (build, fill) => {
+    g.beginPath(); build();
+    if (FILL) { g.fillStyle = fill; g.fill(); return; }
+    g.fillStyle = o.color; g.fill();
+    if (o.mode === 'outline') { g.lineWidth = o.width; g.strokeStyle = o.color; g.lineJoin = 'round'; g.stroke(); }
+  };
+  if (o.glow) { g.shadowColor = o.glowColor; g.shadowBlur = o.glow; }      // glow is in device px
+  if (L.robber) drawRobber(g, L, P, FILL, o); else drawCivilian(g, L, P, FILL, o);
+  if (o.glow) { g.shadowBlur = 0; g.shadowColor = 'rgba(0,0,0,0)'; }
+}
+
+// Round bomb with a lit fuse; o.fuse (0..1) is how much fuse is left.
+function drawBomb(g, P, FILL, o) {
+  P(() => g.arc(62, 40, 26, 0, TAU), '#1b1b20');
+  P(() => rr(g, 55, 8, 14, 10, 2), '#3b3b42');
+  if (!FILL) return;
+  dot(g, 52, 30, 8, 6, 'rgba(255,255,255,.22)');
+  dot(g, 62, 47, 5, 5, o.beep > 0 ? `rgba(255,50,40,${0.45 + 0.55 * o.beep})` : '#5a1010');
+  const f = clamp(o.fuse == null ? 1 : o.fuse, 0, 1);
+  const bez = t => { const u = 1 - t; return [u * u * 62 + 2 * u * t * 48 + t * t * 80, u * u * 8 + 2 * u * t * -16 + t * t * -30]; };
+  g.strokeStyle = '#c9b48a'; g.lineWidth = 3.5; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(62, 8);
+  for (let i = 1; i <= 10; i++) { const [px, py] = bez((i / 10) * f); g.lineTo(px, py); }
+  g.stroke();
+  if (f > 0) {
+    const [sx, sy] = bez(f), fl = 0.75 + 0.25 * Math.sin((o.time || 0) * 40);
+    dot(g, sx, sy, 11 * fl, 11 * fl, 'rgba(255,160,40,.45)');
+    g.save(); g.translate(sx, sy); g.rotate((o.time || 0) * 12); star(g, 6, 9 * fl, 3.5, '#ffe066'); g.restore();
+    dot(g, sx, sy, 2.5, 2.5, '#ffffff');
+  }
+}
+
+function drawRobber(g, L, P, FILL, o) {
+  const cloth = L.cloth, glove = '#151515';
+  if (L.bomb) drawBomb(g, P, FILL, o);
+  else {
+    // money bag slung over the shoulder
+    P(() => g.ellipse(62, 36, 27, 30, 0.2, 0, TAU), '#caa166');
+    P(() => { g.moveTo(46, 12); g.lineTo(52, -6); g.lineTo(66, -8); g.lineTo(66, 12); g.closePath(); }, '#b38a50');
+    if (FILL) {
+      dot(g, 70, 46, 14, 18, 'rgba(0,0,0,.14)');
+      g.strokeStyle = '#7a5728'; g.lineWidth = 4; g.beginPath(); g.moveTo(45, 13); g.lineTo(68, 12); g.stroke();
+      g.fillStyle = '#2f6b2f'; g.font = `900 30px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('$', 63, 40);
+    }
+  }
+  // body
+  P(() => torsoPath(g), cloth);
+  if (FILL) {
+    g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(0, 60); g.lineTo(0, 232); g.stroke();
+    g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.moveTo(-16, 47); g.lineTo(0, 64); g.lineTo(16, 47); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-34, 122, 22, 6); g.fillRect(12, 122, 22, 6);
+    if (L.bomb) {                                  // hi-vis stripes on the bomber's jumpsuit
+      g.fillStyle = 'rgba(255,255,230,.55)'; g.fillRect(-42, 100, 84, 6); g.fillRect(-42, 140, 84, 6);
+    }
+  }
+  // pistol arm
+  P(() => capsule(g, -32, 66, -58, 102, 11), cloth);
+  P(() => capsule(g, -58, 102, -62, 64, 10), cloth);
+  P(() => rr(g, -69, 16, 13, 40, 3), '#3b3f47');
+  P(() => rr(g, -67, 52, 14, 10, 2), '#26292e');
+  if (FILL) { g.fillStyle = 'rgba(255,255,255,.2)'; g.fillRect(-67, 19, 3, 32); g.fillStyle = '#111'; g.fillRect(-66, 13, 7, 4); }
+  P(() => g.arc(-62, 62, 10, 0, TAU), glove);
+  // bag arm
+  P(() => capsule(g, 32, 66, 56, 62, 11), cloth);
+  P(() => capsule(g, 56, 62, 52, 18, 10), cloth);
+  P(() => g.arc(52, 15, 10, 0, TAU), glove);
+  // head in a red ski mask
+  P(() => g.rect(-15, 40, 30, 12), '#b81c1c');
+  P(() => g.arc(0, 27, 23, 0, TAU), '#cc2222');
+  P(() => g.arc(0, 2, 7, 0, TAU), '#a51717');
+  if (FILL) {
+    g.save();
+    g.beginPath(); g.arc(0, 27, 23, 0, TAU); g.clip();
+    g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 2;
+    for (const yy of [9, 13, 45]) { g.beginPath(); g.moveTo(-24, yy); g.lineTo(24, yy); g.stroke(); }
+    g.fillStyle = 'rgba(255,255,255,.14)'; g.beginPath(); g.ellipse(-10, 13, 7, 4, -0.5, 0, TAU); g.fill();
+    dot(g, 0, 25, 16, 7, L.skin);
+    if (o.xeyes) { drawX(g, -7, 25, 3.2); drawX(g, 7, 25, 3.2); }
+    else {
+      dot(g, -7, 25.5, 4.2, 3.4, '#fff'); dot(g, 7, 25.5, 4.2, 3.4, '#fff');
+      dot(g, -6, 26, 2.1, 2.1, '#111'); dot(g, 8, 26, 2.1, 2.1, '#111');
+    }
+    g.strokeStyle = '#6d0d0d'; g.lineWidth = 3.2; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(-14, 17.5); g.lineTo(-2, 21.5); g.moveTo(14, 17.5); g.lineTo(2, 21.5); g.stroke();
+    dot(g, 0, 39, 6.5, 3.6, '#4a1f14');
+    g.fillStyle = '#fff'; g.fillRect(-4, 37, 8, 1.6);
+    g.restore();
+  }
+}
+
+function drawCivilian(g, L, P, FILL, o) {
+  const shirt = L.shirt, skin = L.skin, hs = L.hairStyle;
+  if (hs === 'long') P(() => rr(g, -27, 8, 54, 64, 16), L.hair);
+  P(() => torsoPath(g), shirt);
+  if (FILL) {
+    g.fillStyle = 'rgba(0,0,0,.12)';
+    g.beginPath(); g.moveTo(26, 52); g.quadraticCurveTo(42, 56, 42, 90); g.lineTo(42, 232); g.lineTo(30, 232); g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.2)'; g.lineWidth = 2; g.strokeRect(-34, 92, 18, 16);
+    g.fillStyle = '#2b4fd2'; g.fillRect(-30, 86, 3, 10);
+    g.fillStyle = '#ffffff';
+    g.beginPath(); g.moveTo(-16, 46); g.lineTo(-2, 47); g.lineTo(-7, 62); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(16, 46); g.lineTo(2, 47); g.lineTo(7, 62); g.closePath(); g.fill();
+    g.fillStyle = L.tie;
+    g.beginPath(); g.moveTo(-5, 49); g.lineTo(5, 49); g.lineTo(3.5, 58); g.lineTo(-3.5, 58); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(-3.5, 58); g.lineTo(3.5, 58); g.lineTo(8, 120); g.lineTo(0, 132); g.lineTo(-8, 120); g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.28)'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(-4, 74); g.lineTo(5, 68); g.moveTo(-5, 92); g.lineTo(6, 85); g.moveTo(-7, 110); g.lineTo(7, 102); g.stroke();
+  }
+  P(() => capsule(g, -36, 66, -46, 150, 11), shirt);
+  if (L.briefcase) {
+    P(() => capsule(g, 36, 66, 46, 108, 11), shirt);
+    P(() => capsule(g, 46, 108, 16, 112, 10), shirt);
+    P(() => rr(g, -12, 88, 24, 10, 4), '#5a3418');
+    P(() => rr(g, -30, 96, 60, 42, 5), '#7a4722');
+    if (FILL) {
+      g.fillStyle = '#4a2a12'; g.fillRect(-30, 110, 60, 3);
+      g.fillStyle = '#e0b84a'; g.fillRect(-18, 106, 7, 7); g.fillRect(11, 106, 7, 7);
+      g.fillStyle = 'rgba(255,255,255,.14)'; g.fillRect(-26, 99, 52, 3);
+    }
+    P(() => g.arc(14, 110, 9, 0, TAU), skin);
+  } else {
+    P(() => capsule(g, 36, 66, 46, 150, 11), shirt);
+  }
+  // neck, ears, head
+  P(() => g.rect(-8, 38, 16, 14), skin);
+  P(() => g.arc(-21, 29, 5, 0, TAU), skin);
+  P(() => g.arc(21, 29, 5, 0, TAU), skin);
+  P(() => g.arc(0, 27, 22, 0, TAU), skin);
+  // hair
+  if (hs === 'short' || hs === 'long' || hs === 'bun') {
+    P(() => { g.arc(0, 25, 24, Math.PI * 1.04, Math.PI * 1.96); g.closePath(); }, L.hair);
+  }
+  if (hs === 'bun') P(() => g.arc(0, 0, 10, 0, TAU), L.hair);
+  if (hs === 'curly') {
+    P(() => {
+      for (let i = 0; i < 7; i++) {
+        const a = Math.PI * (1.05 + i * 0.15), cx = Math.cos(a) * 20, cy = 27 + Math.sin(a) * 20;
+        g.moveTo(cx + 8, cy); g.arc(cx, cy, 8, 0, TAU);
+      }
+    }, L.hair);
+  }
+  if (hs === 'bald') {
+    P(() => g.ellipse(-19, 24, 5, 9, 0, 0, TAU), L.hair);
+    P(() => g.ellipse(19, 24, 5, 9, 0, 0, TAU), L.hair);
+  }
+  if (FILL) {
+    // scared face
+    if (o.xeyes) { drawX(g, -8, 28, 3.8); drawX(g, 8, 28, 3.8); }
+    else {
+      dot(g, -8, 28, 5, 5.5, '#fff'); dot(g, 8, 28, 5, 5.5, '#fff');
+      dot(g, -8, 29, 2.4, 2.4, '#222'); dot(g, 8, 29, 2.4, 2.4, '#222');
+      dot(g, -7, 27.5, 0.9, 0.9, '#fff'); dot(g, 9, 27.5, 0.9, 0.9, '#fff');
+    }
+    g.strokeStyle = '#4a3020'; g.lineWidth = 2.4; g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(-13, 21); g.quadraticCurveTo(-8, 17, -3, 20.5);
+    g.moveTo(3, 20.5); g.quadraticCurveTo(8, 17, 13, 21);
+    g.stroke();
+    dot(g, 0, 40, 4, 5, '#5a2a20');
+    dot(g, -14, 35, 4, 3, 'rgba(255,110,110,.28)'); dot(g, 14, 35, 4, 3, 'rgba(255,110,110,.28)');
+    if (L.glasses) {
+      g.strokeStyle = '#222'; g.lineWidth = 2;
+      g.beginPath(); g.arc(-8, 28, 7, 0, TAU); g.moveTo(15, 28); g.arc(8, 28, 7, 0, TAU);
+      g.moveTo(-1, 27); g.lineTo(1, 27); g.stroke();
+    }
+  }
+}
+
+function drawChar(g, c) {
+  const sp = c.spot, s = sp.s, pop = Math.max(0, c.pop);
+  if (pop < 0.01) return;
+  g.save();
+  if (sp.kind === 'vault') { g.beginPath(); g.arc(VAULT.x, VAULT.y, VAULT.r - 2, 0, TAU); g.clip(); }
+  g.beginPath(); g.rect(sp.x - 220, 0, 440, sp.coverTop); g.clip();
+  g.translate(sp.x, sp.coverTop);
+  const wob = c.wobble > 0 ? Math.sin(c.t * 50) * 0.07 * c.wobble : 0;   // bomb robber flinches when hit
+  if (c.angle || wob) g.rotate(c.angle + wob);
+  g.translate(0, -CHAR_H * s * pop);
+  g.scale(c.look.flip ? -s : s, s);
+  const rob = c.look.robber, bomb = c.bomb;
+  drawPerson(g, c.look, {
+    mode: 'outline', color: bomb ? '#ffb31a' : rob ? '#ff2b2b' : '#2cf57a', width: bomb ? 11 : 9,
+    glow: bomb ? (14 + 12 * Math.sin(S.clock * 10)) * scale : 0, glowColor: '#ff7a00'
+  });
+  drawPerson(g, c.look, {
+    mode: 'fill', xeyes: c.state === 'hit' || c.state === 'shot',
+    fuse: bomb ? c.bombT / BOMB_T : 1, time: S.clock, beep: c.beepFlash
+  });
+  let fl = c.flash, fc = c.flashColor;
+  if (c.state === 'shot') { fl = Math.max(fl, 0.3 + 0.2 * Math.sin(c.t * 12)); fc = '#ff2020'; }
+  if (fl > 0) { g.globalAlpha = fl * 0.85; drawPerson(g, c.look, { mode: 'solid', color: fc }); }
+  g.restore();
+}
+
+/* =====================================================================
+   RENDER — gun, effects, HUD
+   ===================================================================== */
+function drawSleeve(g) {
+  g.fillStyle = '#1d355e'; g.beginPath(); capsule(g, -160, 0, 60, 0, 42); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.08)'; g.beginPath(); capsule(g, -160, -24, 50, -24, 9); g.fill();
+  g.fillStyle = '#2b4f8f'; g.fillRect(46, -41, 22, 82);
+  g.fillStyle = '#ffcf4a'; g.fillRect(50, -41, 4, 82);
+}
+function drawMuzzleFlash(g, x, y, size) {
+  const a = Math.min(1, gun.flash / 0.07);
+  g.save();
+  g.translate(x, y); g.rotate(gun.flashRot); g.globalAlpha = a;
+  const gl = g.createRadialGradient(0, 0, 0, 0, 0, 70 * size);
+  gl.addColorStop(0, 'rgba(255,230,140,.8)'); gl.addColorStop(1, 'rgba(255,180,60,0)');
+  g.fillStyle = gl; g.beginPath(); g.arc(0, 0, 70 * size, 0, TAU); g.fill();
+  star(g, 9, 48 * size, 18 * size, '#ffc53d');
+  star(g, 7, 26 * size, 10 * size, '#fff8d6');
+  g.restore();
+}
+
+// Reload animation: gun dips and tilts into a reload pose, the old magazine drops out,
+// a new one slides in, the slide is racked, then the gun snaps back up.
+function reloadPose() {
+  const p = clamp(S.reloadT / RELOAD_T, 0, 1);
+  let blend;
+  if (p < 0.15) blend = easeOutCubic(p / 0.15);
+  else if (p < 0.85) blend = 1;
+  else blend = 1 - easeOutBack((p - 0.85) / 0.15);            // overshoots slightly = "snap"
+  let mag = 0, oldMag = true;
+  if (p >= 0.15 && p < 0.45) mag = easeInQuad((p - 0.15) / 0.3);
+  else if (p >= 0.45 && p < 0.75) { mag = 1 - easeOutCubic((p - 0.45) / 0.3); oldMag = false; }
+  else if (p >= 0.75) oldMag = false;
+  const rack = p > 0.72 && p < 0.88 ? Math.sin(((p - 0.72) / 0.16) * Math.PI) : 0;
+  return { blend, mag, oldMag, rack };
+}
+
+function drawGun(g) {
+  if (S.berserk) { drawMinigun(g); return; }
+  const k = gun.recoil;
+  const r = S.reloading ? reloadPose() : null;
+  const b = r ? r.blend : 0;
+  g.save();
+  g.translate(GUN_PIVOT.x + (610 - GUN_PIVOT.x) * b, GUN_PIVOT.y + (690 - GUN_PIVOT.y) * b);
+  g.rotate(gun.angle + (-0.28 - gun.angle) * b - k * 0.08);
+  g.translate(-k * 24, 0);
+  drawSleeve(g);
+  // magazine (only visible while reloading; slides along the grip)
+  if (r && (r.mag > 0.001 || !r.oldMag)) {
+    g.save();
+    if (r.oldMag) g.globalAlpha = 1 - clamp((r.mag - 0.6) / 0.4, 0, 1);
+    g.fillStyle = r.oldMag ? '#2a2d33' : '#3d424b';
+    g.beginPath(); rr(g, 104, 4 + r.mag * 90, 26, 52, 4); g.fill();
+    if (!r.oldMag) { g.fillStyle = '#d9a640'; g.fillRect(109, 2 + r.mag * 90, 16, 6); }
+    g.restore();
+  }
+  // pistol
+  g.fillStyle = '#202329'; g.beginPath(); rr(g, 100, 2, 120, 14, 4); g.fill();
+  g.strokeStyle = '#202329'; g.lineWidth = 5; g.beginPath(); g.arc(130, 18, 11, 0, Math.PI); g.stroke();
+  const slide = r ? -r.rack * 18 : 0;
+  const sg = g.createLinearGradient(0, -22, 0, 6);
+  sg.addColorStop(0, '#5f6570'); sg.addColorStop(0.4, '#30343b'); sg.addColorStop(1, '#1b1d22');
+  g.fillStyle = sg; g.beginPath(); rr(g, 84 + slide, -22, 172, 28, 5); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 2;
+  for (let i = 0; i < 5; i++) { g.beginPath(); g.moveTo(98 + slide + i * 7, -18); g.lineTo(98 + slide + i * 7, 2); g.stroke(); }
+  g.fillStyle = '#111'; g.fillRect(156 + slide, -18, 26, 7);
+  g.fillStyle = '#16181c'; g.fillRect(244 + slide, -28, 7, 7); g.fillRect(88 + slide, -28, 12, 7);
+  g.fillStyle = '#0b0c0e'; g.fillRect(252 + slide, -18, 5, 20);
+  // hand
+  dot(g, 92, 6, 36, 30, '#e2ad84');
+  g.strokeStyle = 'rgba(120,60,30,.35)'; g.lineWidth = 2;
+  for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(84 + i * 10, 14); g.lineTo(96 + i * 10, 30); g.stroke(); }
+  g.fillStyle = '#ebbc94'; g.beginPath(); g.ellipse(124, -9, 20, 8, -0.08, 0, TAU); g.fill();
+  if (gun.flash > 0 && !r) drawMuzzleFlash(g, 272, -8, 1);
+  g.restore();
+}
+
+// Berserk weapon: six spinning barrels, ammo belt, continuous muzzle flash.
+function drawMinigun(g) {
+  const firing = hold.down && S.mode === 'playing';
+  const j = firing ? rand(-2, 2) : 0;
+  g.save();
+  g.translate(GUN_PIVOT.x + j, GUN_PIVOT.y + j);
+  g.rotate(gun.angle);
+  g.translate(-gun.recoil * 8, 0);
+  drawSleeve(g);
+  // ammo belt
+  for (let i = 0; i < 7; i++) {
+    const bx = 112 - i * 13, by = 34 + i * i * 1.6;
+    g.fillStyle = '#d9a640'; g.beginPath(); rr(g, bx - 4, by, 9, 15, 3); g.fill();
+    g.fillStyle = '#9a6a1e'; g.fillRect(bx - 4, by + 10, 9, 5);
+  }
+  // housing + carry handle
+  const hg = g.createLinearGradient(0, -34, 0, 34);
+  hg.addColorStop(0, '#5a5f69'); hg.addColorStop(0.5, '#2c2f36'); hg.addColorStop(1, '#17191d');
+  g.fillStyle = hg; g.beginPath(); rr(g, 70, -34, 122, 68, 12); g.fill();
+  g.strokeStyle = '#2a2c31'; g.lineWidth = 7; g.beginPath(); g.moveTo(100, -34); g.lineTo(108, -54); g.lineTo(150, -54); g.lineTo(158, -34); g.stroke();
+  g.fillStyle = 'rgba(255,255,255,.1)';
+  for (let i = 0; i < 4; i++) g.fillRect(120 + i * 14, -20, 6, 40);
+  g.fillStyle = '#ff3b2b'; g.fillRect(78, -6, 10, 12);              // power light
+  // barrels (depth-sorted so the cluster reads as rotating)
+  const bars = [];
+  for (let i = 0; i < 6; i++) { const a = S.spin + (i * TAU) / 6; bars.push({ y: Math.sin(a) * 14, z: Math.cos(a) }); }
+  bars.sort((a, b) => a.z - b.z);
+  for (const bar of bars) {
+    const sh = 0.45 + 0.55 * (bar.z * 0.5 + 0.5);
+    g.fillStyle = `rgb(${(46 + 80 * sh) | 0},${(50 + 84 * sh) | 0},${(58 + 90 * sh) | 0})`;
+    g.fillRect(190, bar.y - 4.5, 124, 9);
+  }
+  g.fillStyle = '#26292f';
+  g.beginPath(); rr(g, 236, -22, 12, 44, 3); g.fill();
+  g.beginPath(); rr(g, 304, -21, 14, 42, 3); g.fill();
+  dot(g, 92, 22, 30, 24, '#e2ad84');                                // hand on the grip
+  if (gun.flash > 0) drawMuzzleFlash(g, 336, 0, 1.25);
+  g.restore();
+}
+
+function drawHoles(g) {
+  for (const h of holes) {
+    g.globalAlpha = h.age < 3 ? 1 : Math.max(0, 1 - (h.age - 3));
+    dot(g, h.x, h.y, 9, 9, 'rgba(0,0,0,.2)');
+    g.strokeStyle = 'rgba(30,20,10,.55)'; g.lineWidth = 1.5;
+    g.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = h.rot + (i / 5) * TAU, l = 10 + (i % 2) * 5;
+      g.moveTo(h.x + Math.cos(a) * 5, h.y + Math.sin(a) * 5);
+      g.lineTo(h.x + Math.cos(a) * l, h.y + Math.sin(a) * l);
+    }
+    g.stroke();
+    dot(g, h.x, h.y, 4.5, 4.5, '#1a1410');
+    dot(g, h.x - 1, h.y - 1, 1.5, 1.5, 'rgba(255,255,255,.35)');
+  }
+  g.globalAlpha = 1;
+}
+
+function drawParticles(g) {
+  for (const p of particles) {
+    const a = 1 - p.life / p.max;
+    g.globalAlpha = a;
+    if (p.kind === 'bill') {
+      g.save(); g.translate(p.x, p.y); g.rotate(p.rot); g.scale(1, 0.5 + 0.5 * Math.abs(Math.cos(p.life * 8)));
+      g.fillStyle = p.color; g.fillRect(-10, -5, 20, 10);
+      g.fillStyle = '#3f8f3f'; g.fillRect(-3, -3, 6, 6);
+      g.restore();
+    } else if (p.kind === 'smoke') {
+      g.globalAlpha = a * 0.7;
+      const r = p.size * (1 + (1 - a) * 1.8);
+      dot(g, p.x, p.y, r, r, p.color);
+    } else if (p.kind === 'dust') {
+      dot(g, p.x, p.y, p.size * (1 + (1 - a) * 1.5), p.size * (1 + (1 - a) * 1.5), p.color);
+    } else {
+      dot(g, p.x, p.y, p.size * (0.4 + a * 0.6), p.size * (0.4 + a * 0.6), p.color);
+    }
+  }
+  g.globalAlpha = 1;
+}
+
+function drawTracers(g) {
+  g.lineCap = 'round';
+  for (const t of tracers) {
+    g.strokeStyle = `rgba(255,240,180,${1 - t.t / 0.07})`; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(t.x1, t.y1); g.lineTo(t.x2, t.y2); g.stroke();
+  }
+  g.lineCap = 'butt';
+}
+
+function drawExplosions(g) {
+  for (const e of explosions) {
+    const t = e.t;
+    // shockwave ring
+    const rk = easeOutCubic(Math.min(1, t / 0.5));
+    g.globalAlpha = Math.max(0, 1 - t / 0.5);
+    g.strokeStyle = '#fff1c4'; g.lineWidth = 12 * (1 - rk) + 2;
+    g.beginPath(); g.arc(e.x, e.y, e.r * 1.7 * rk, 0, TAU); g.stroke();
+    // fireball
+    const fk = Math.min(1, t / 0.25), fade = t < 0.35 ? 1 : Math.max(0, 1 - (t - 0.35) / 0.6);
+    const R = e.r * (0.35 + 0.65 * easeOutCubic(fk));
+    g.globalAlpha = fade;
+    const gr = g.createRadialGradient(e.x, e.y, 0, e.x, e.y, R);
+    gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.25, '#fff2a8'); gr.addColorStop(0.55, '#ff9a1a');
+    gr.addColorStop(0.85, 'rgba(200,40,10,0.7)'); gr.addColorStop(1, 'rgba(60,20,10,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(e.x, e.y, R, 0, TAU); g.fill();
+    for (let i = 0; i < 7; i++) {
+      const a = e.seed + i * 0.9, d = R * 0.6 * easeOutCubic(fk);
+      dot(g, e.x + Math.cos(a) * d, e.y + Math.sin(a) * d * 0.8, R * 0.3, R * 0.3, `rgba(255,${120 + i * 15},30,${0.7 * fade})`);
+    }
+  }
+  g.globalAlpha = 1;
+}
+
+// Countdown badge + health pips above each live bomb robber.
+function drawBombUI(g) {
+  const k = view.uiK;
+  for (const c of chars) {
+    if (!c.bomb || !isActive(c) || c.pop < 0.2) continue;
+    const top = charTop(c), x = c.spot.x, y = top - 46 * k;
+    const left = Math.max(0, c.bombT), frac = left / BOMB_T;
+    const col = left > 3 ? '#ffd23f' : left > 1.5 ? '#ff9a2e' : '#ff3b3b';
+    const pulse = 1 + 0.2 * c.beepFlash;
+    g.save();
+    g.translate(x, y); g.scale(pulse, pulse);
+    dot(g, 0, 0, 23 * k, 23 * k, 'rgba(10,10,14,.85)');
+    g.strokeStyle = 'rgba(255,255,255,.15)'; g.lineWidth = 4 * k;
+    g.beginPath(); g.arc(0, 0, 20 * k, 0, TAU); g.stroke();
+    g.strokeStyle = col; g.lineCap = 'round';
+    g.beginPath(); g.arc(0, 0, 20 * k, -Math.PI / 2, -Math.PI / 2 + TAU * frac); g.stroke();
+    g.lineCap = 'butt';
+    drawText(g, String(Math.ceil(left)), 0, 9 * k, 25 * k, col, { sw: 4 });
+    g.restore();
+    for (let i = 0; i < BOMB_HP; i++) {
+      const px = x + (i - (BOMB_HP - 1) / 2) * 15 * k, py = top - 14 * k;
+      dot(g, px, py, 6 * k, 6 * k, 'rgba(0,0,0,.7)');
+      dot(g, px, py, 4.5 * k, 4.5 * k, i < c.hp ? '#ff3b3b' : 'rgba(255,255,255,.2)');
+    }
+  }
+}
+
+function drawPopups(g) {
+  for (const p of popups) {
+    if (p.t < 0) continue;
+    const k = p.t / p.max;
+    const sc = p.t < 0.12 ? 0.5 + (p.t / 0.12) * 0.7 : 1.2 - Math.min(0.2, (p.t - 0.12) * 1.5);
+    g.save();
+    g.globalAlpha = clamp(k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4, 0, 1);
+    g.translate(p.x, p.y - easeOutCubic(k) * 55);
+    g.scale(sc, sc);
+    drawText(g, p.text, 0, 0, p.size, p.color, { sw: p.size * 0.18 });
+    g.restore();
+  }
+}
+
+function drawCrosshair(g, x, y, alpha) {
+  const r = 18 * view.uiK * (1 + gun.recoil * 0.6) * (S.berserk ? 1.3 : 1);
+  const tint = S.berserk ? '#ff6a4a' : S.reloading ? '#9a9a9a' : '#ffffff';
+  g.save();
+  g.globalAlpha = alpha; g.lineCap = 'round';
+  for (const [w, c] of [[5, 'rgba(0,0,0,.65)'], [2.2, tint]]) {
+    g.lineWidth = w; g.strokeStyle = c;
+    g.beginPath();
+    g.arc(x, y, r, 0, TAU);
+    g.moveTo(x - r - 10, y); g.lineTo(x - r + 7, y);
+    g.moveTo(x + r - 7, y); g.lineTo(x + r + 10, y);
+    g.moveTo(x, y - r - 10); g.lineTo(x, y - r + 7);
+    g.moveTo(x, y + r - 7); g.lineTo(x, y + r + 10);
+    g.stroke();
+  }
+  dot(g, x, y, 2.6, 2.6, '#ff3030');
+  g.restore();
+}
+
+function vignette(g, rgb, a) {
+  const gr = g.createRadialGradient(640, 360, 280, 640, 360, 780);
+  gr.addColorStop(0, `rgba(${rgb},0)`); gr.addColorStop(1, `rgba(${rgb},${a})`);
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+}
+
+// HUD text is scaled by view.uiK (1 on desktop, up to 1.35 on phones) so it stays readable.
+function hudHeight() { return Math.round(58 * view.uiK); }
+
+function drawHUD(g) {
+  const k = view.uiK, bar = hudHeight(), valY = bar - 8 * k;
+  g.fillStyle = 'rgba(8,10,16,0.82)'; g.fillRect(0, 0, W, bar);
+  g.fillStyle = 'rgba(255,207,74,0.55)'; g.fillRect(0, bar, W, 2);
+  // time bar
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(0, bar + 2, W, 6);
+  g.fillStyle = S.time < 10 ? '#ff3b3b' : S.time < 20 ? '#ffb02e' : '#3ee07a';
+  g.fillRect(0, bar + 2, W * clamp(S.time / TIME_MAX, 0, 1), 6);
+
+  const lbl = { align: 'left', stroke: false };
+  drawText(g, 'SCORE', 24, 19 * k, 12 * k, '#b9b1a0', lbl);
+  drawText(g, fmt(S.shownScore), 24, valY, 30 * k, '#ffffff', { align: 'left', sw: 4 });
+  drawText(g, 'HIGH SCORE', 250, 19 * k, 12 * k, '#b9b1a0', lbl);
+  drawText(g, fmt(Math.max(S.highScore, S.score)), 250, valY, 24 * k, '#ffcf4a', { align: 'left', sw: 4 });
+
+  // timer
+  const low = S.time < 10 && S.mode !== 'over';
+  const pulse = low ? 1 + 0.14 * Math.abs(Math.sin(S.clock * Math.PI * 2)) : 1;
+  drawText(g, 'TIME', 640, 15 * k, 11 * k, low ? '#ff8080' : '#b9b1a0', { stroke: false });
+  g.save(); g.translate(640, valY - 12 * k); g.scale(pulse, pulse);
+  drawText(g, S.time.toFixed(1), 0, 12 * k, 34 * k, low ? '#ff4040' : '#ffffff', { sw: 5 });
+  g.restore();
+  // time bonus/penalty floaters drift down from just under the timer (below the berserk bar when active)
+  const fy = bar + (S.berserk && S.mode === 'playing' ? 64 : 28) * k;
+  for (const f of timeFloaters) {
+    g.globalAlpha = 1 - f.t;
+    drawText(g, f.text, 640, fy + f.t * 22 * k, 22 * k, f.color, { sw: 4 });
+  }
+  g.globalAlpha = 1;
+
+  // combo
+  const cx = 790;
+  drawText(g, 'COMBO', cx, 19 * k, 12 * k, '#b9b1a0', lbl);
+  g.save(); g.translate(cx, valY); const cp = 1 + S.comboPulse * 0.4; g.scale(cp, cp);
+  drawText(g, `x${S.mult}`, 0, 0, 30 * k, COMBO_COLORS[S.mult - 1], { align: 'left', sw: 4 });
+  g.restore();
+  if (S.mult < 5) {
+    const fill = S.streak % 3;
+    for (let i = 0; i < 3; i++) {
+      dot(g, cx + 60 * k + i * 13 * k, valY - 10 * k, 4.5 * k, 4.5 * k, i < fill ? '#ffcf4a' : 'rgba(255,255,255,.18)');
+    }
+  } else {
+    drawText(g, 'MAX', cx + 58 * k, valY - 4 * k, 16 * k, '#ff4fd8', { align: 'left', stroke: false });
+  }
+  // level (pulses on level-up)
+  drawText(g, 'LEVEL', 935, 19 * k, 12 * k, S.levelPulse > 0 ? '#ffcf4a' : '#b9b1a0', lbl);
+  g.save(); g.translate(935, valY); const lp = 1 + S.levelPulse * 0.5; g.scale(lp, lp);
+  drawText(g, String(S.level + 1), 0, 0, 26 * k, S.levelPulse > 0 ? '#ffcf4a' : '#ffffff', { align: 'left', sw: 4 });
+  g.restore();
+}
+
+// Bottom-left panel: ammo bullets + kill streak meter toward berserk.
+function drawAmmoPanel(g) {
+  const k = view.uiK, pw = 250 * k, ph = 88 * k, x0 = 14, y0 = H - 14 - ph;
+  g.fillStyle = 'rgba(8,10,16,0.74)'; g.beginPath(); rr(g, x0, y0, pw, ph, 12 * k); g.fill();
+  g.strokeStyle = S.berserk ? 'rgba(255,70,40,.8)' : 'rgba(255,207,74,0.35)'; g.lineWidth = 2; g.stroke();
+  const lbl = { align: 'left', stroke: false };
+
+  drawText(g, 'AMMO', x0 + 12 * k, y0 + 17 * k, 11 * k, '#b9b1a0', lbl);
+  if (S.berserk) {
+    drawText(g, '∞  UNLIMITED', x0 + 12 * k, y0 + 45 * k, 20 * k, '#ff6a4a', { align: 'left', sw: 4 });
+  } else {
+    for (let i = 0; i < MAG_SIZE; i++) {
+      const bx = x0 + 12 * k + i * 21 * k, by = y0 + 23 * k, bw = 11 * k, bh = 24 * k;
+      const full = i < S.ammo;
+      const pop = full && i === S.ammo - 1 ? S.ammoPulse : 0;
+      g.save();
+      g.translate(bx + bw / 2, by + bh / 2); g.scale(1 + pop * 0.35, 1 + pop * 0.35); g.translate(-bw / 2, -bh / 2);
+      if (full) {
+        g.fillStyle = '#d9a640'; g.beginPath(); rr(g, 0, bh * 0.38, bw, bh * 0.62, 2); g.fill();     // casing
+        g.fillStyle = '#c0703a'; g.beginPath(); g.moveTo(0, bh * 0.4); g.lineTo(bw / 2, 0); g.lineTo(bw, bh * 0.4); g.closePath(); g.fill(); // tip
+        if (pop > 0) { g.fillStyle = `rgba(127,224,255,${pop})`; g.beginPath(); rr(g, -2, -2, bw + 4, bh + 4, 3); g.fill(); }
+      } else {
+        g.strokeStyle = 'rgba(255,255,255,.28)'; g.lineWidth = 1.5;
+        g.beginPath(); rr(g, 0, bh * 0.38, bw, bh * 0.62, 2); g.stroke();
+      }
+      g.restore();
+    }
+    const tx = x0 + 12 * k + MAG_SIZE * 21 * k + 6 * k;
+    if (S.reloading) {
+      const blink = S.reloadNag > 0 && Math.sin(S.clock * 30) > 0;
+      drawText(g, 'RELOADING', tx, y0 + 40 * k, 13 * k, blink ? '#ff5a5a' : '#ffcf4a', { align: 'left', stroke: false });
+    }
+  }
+
+  // kill streak meter
+  const frac = S.berserk ? clamp(S.berserkT / BERSERK_T, 0, 1) : clamp(S.killStreak / BERSERK_STREAK, 0, 1);
+  drawText(g, S.berserk ? 'BERSERK!' : 'KILL STREAK', x0 + 12 * k, y0 + 64 * k, 11 * k, S.berserk ? '#ff6a4a' : '#b9b1a0', lbl);
+  drawText(g, S.berserk ? `${S.berserkT.toFixed(1)}s` : `${S.killStreak} / ${BERSERK_STREAK}`,
+    x0 + pw - 12 * k, y0 + 64 * k, 13 * k, S.berserk ? '#ff6a4a' : '#ffffff', { align: 'right', stroke: false });
+  const bx = x0 + 12 * k, by = y0 + 70 * k, bw = pw - 24 * k, bh = 9 * k;
+  g.fillStyle = 'rgba(255,255,255,.1)'; g.beginPath(); rr(g, bx, by, bw, bh, bh / 2); g.fill();
+  if (frac > 0) {
+    const sg = g.createLinearGradient(bx, 0, bx + bw, 0);
+    sg.addColorStop(0, '#ffb02e'); sg.addColorStop(1, '#ff3b2b');
+    g.fillStyle = sg; g.beginPath(); rr(g, bx, by, Math.max(bh, bw * frac), bh, bh / 2); g.fill();
+  }
+  if (!S.berserk && S.killStreak >= BERSERK_STREAK - 3) {        // almost there: glow
+    g.strokeStyle = `rgba(255,90,60,${0.5 + 0.5 * Math.sin(S.clock * 12)})`; g.lineWidth = 2;
+    g.beginPath(); rr(g, bx - 2, by - 2, bw + 4, bh + 4, bh / 2 + 2); g.stroke();
+  }
+}
+
+// Circular reload progress next to the gun.
+function drawReloadIndicator(g) {
+  if (!S.reloading) return;
+  const k = view.uiK, x = 540, y = 612, r = 26 * k;
+  const p = clamp(S.reloadT / RELOAD_T, 0, 1);
+  dot(g, x, y, r + 6 * k, r + 6 * k, 'rgba(8,10,16,.8)');
+  g.lineWidth = 6 * k; g.lineCap = 'round';
+  g.strokeStyle = 'rgba(255,255,255,.15)'; g.beginPath(); g.arc(x, y, r, 0, TAU); g.stroke();
+  g.strokeStyle = '#ffcf4a'; g.beginPath(); g.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + TAU * p); g.stroke();
+  g.lineCap = 'butt';
+  drawText(g, String(MAG_SIZE), x, y + 8 * k, 22 * k, '#ffffff', { sw: 3 });
+  const nag = S.reloadNag, blink = nag > 0 && Math.sin(S.clock * 30) > 0;
+  g.save();
+  g.translate(x, y - r - 16 * k); g.scale(1 + nag * 0.25, 1 + nag * 0.25);
+  drawText(g, 'RELOADING', 0, 0, 18 * k, blink ? '#ff4a4a' : '#ffffff', { sw: 4 });
+  g.restore();
+}
+
+function drawBerserkBar(g) {
+  const k = view.uiK, w = 440 * k, h = 14 * k, x = 640 - w / 2, y = hudHeight() + 22 * k;
+  const frac = clamp(S.berserkT / BERSERK_T, 0, 1);
+  drawText(g, `BERSERK  ${S.berserkT.toFixed(1)}s`, 640, y - 4 * k, 16 * k, '#ff6a4a', { sw: 4 });
+  g.fillStyle = 'rgba(0,0,0,.6)'; g.beginPath(); rr(g, x - 3, y - 3 + 4 * k, w + 6, h + 6, h / 2 + 3); g.fill();
+  const sg = g.createLinearGradient(x, 0, x + w, 0);
+  sg.addColorStop(0, '#ff3b2b'); sg.addColorStop(1, '#ffb02e');
+  g.fillStyle = sg; g.beginPath(); rr(g, x, y + 4 * k, Math.max(h, w * frac), h, h / 2); g.fill();
+}
+
+function drawBerserkBanner(g) {
+  const t = S.berserkAge;
+  const k = t < 0.3 ? easeOutBack(t / 0.3) : 1;
+  g.save();
+  g.globalAlpha = clamp(t > 1.1 ? 1 - (t - 1.1) / 0.4 : 1, 0, 1);
+  g.translate(640 + rand(-3, 3), 330 + rand(-3, 3)); g.scale(k * 1.4 - 0.4 * Math.min(1, t / 0.3), k);
+  drawText(g, 'BERSERK MODE!', 0, 0, 88 * view.uiK, '#ff3b2b', { sw: 12, strokeColor: '#1a0000' });
+  drawText(g, 'HOLD TO FIRE — UNLIMITED AMMO', 0, 48 * view.uiK, 24 * view.uiK, '#ffffff', { sw: 5 });
+  g.restore();
+}
+
+function drawBanner(g) {
+  const b = S.banner, t = b.t;
+  const k = t < 0.25 ? easeOutBack(t / 0.25) : 1;
+  g.save();
+  g.globalAlpha = clamp(t > 1.0 ? 1 - (t - 1.0) / 0.4 : 1, 0, 1);
+  g.translate(640, hudHeight() + (S.berserk ? 110 : 66) * view.uiK); g.scale(k, k);
+  drawText(g, `${b.text}  —  ${b.sub}`, 0, 0, 34 * view.uiK, '#ffcf4a', { sw: 7 });
+  g.restore();
+}
+
+function drawDying(g) {
+  const t = S.dyingTotal - S.dyingT, k = easeOutBack(Math.min(1, t / 0.35));
+  const civ = S.reason === 'civilian';
+  g.save();
+  g.translate(640, 320); g.scale(k, k);
+  drawText(g, civ ? 'CIVILIAN DOWN!' : "TIME'S UP!", 0, 0, civ ? 76 : 96, civ ? '#ff4848' : '#ffcf4a', { sw: 10 });
+  drawText(g, civ ? 'Never shoot civilians!' : 'The robbers got away...', 0, 50, 26, '#ffffff', { sw: 5 });
+  g.restore();
+}
+
+function render() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const inRun = S.mode === 'playing' || S.mode === 'paused' || S.mode === 'dying';
+
+  ctx.save();
+  if (S.shake > 0 && S.mode !== 'paused') ctx.translate(rand(-1, 1) * S.shake * 0.6, rand(-1, 1) * S.shake * 0.6);
+  ctx.drawImage(bgCanvas, 0, 0, W, H);
+  for (const row of ROWS) {
+    for (const sp of row) if (sp.char) drawChar(ctx, sp.char);
+    for (const sp of row) drawCover(ctx, sp);
+  }
+  drawBombUI(ctx);
+  drawExplosions(ctx);
+  drawHoles(ctx);
+  drawTracers(ctx);
+  drawParticles(ctx);
+  drawPopups(ctx);
+  drawGun(ctx);
+  ctx.restore();
+
+  if (S.berserk && inRun) {
+    ctx.fillStyle = `rgba(255,0,0,${0.1 + 0.05 * Math.sin(S.clock * 8)})`; ctx.fillRect(0, 0, W, H);
+    vignette(ctx, '200,0,0', 0.6);
+  } else if (S.time < 10 && (S.mode === 'playing' || S.mode === 'paused')) {
+    vignette(ctx, '255,30,30', 0.22 + 0.2 * Math.abs(Math.sin(S.clock * Math.PI * 2)));
+  }
+  if (S.mode === 'dying' && S.reason === 'civilian') vignette(ctx, '255,0,0', 0.55);
+  if (S.redFlash > 0) { ctx.fillStyle = `rgba(255,20,20,${S.redFlash * 0.5})`; ctx.fillRect(0, 0, W, H); }
+  if (S.boomFlash > 0) { ctx.fillStyle = `rgba(255,236,190,${S.boomFlash * 0.65})`; ctx.fillRect(0, 0, W, H); }
+
+  if (S.mode !== 'menu') { drawHUD(ctx); drawAmmoPanel(ctx); }
+  if (S.mode === 'playing' || S.mode === 'paused') {
+    drawReloadIndicator(ctx);
+    if (S.berserk) drawBerserkBar(ctx);
+  }
+  if (S.banner && S.mode === 'playing') drawBanner(ctx);
+  if (S.berserk && S.berserkAge < 1.5 && S.mode === 'playing') drawBerserkBanner(ctx);
+  if (S.mode === 'dying') drawDying(ctx);
+
+  if (S.mode === 'playing' || S.mode === 'dying') {
+    if (aim.mouse && aim.inside) drawCrosshair(ctx, aim.x, aim.y, 1);
+    else if (aim.tapT > 0) drawCrosshair(ctx, aim.x, aim.y, Math.min(1, aim.tapT * 3));
+  }
+}
+
+/* =====================================================================
+   INPUT
+   ===================================================================== */
+// Screen (client) point -> game coordinates. Undoes the 90deg stage rotation used on upright phones:
+// the stage maps its local (x, y) to screen (vw - y, x), so local = (screenY, vw - screenX).
+function toGame(e) {
+  const sx = view.rotated ? e.clientY : e.clientX;
+  const sy = view.rotated ? view.vw - e.clientX : e.clientY;
+  return { x: ((sx - view.wl) * W) / view.ww, y: ((sy - view.wt) * H) / view.wh };
+}
+function setTouchMode(on) {
+  if (view.touch === on) return;
+  view.touch = on;
+  document.body.classList.toggle('touch', on);
+  updateHudButtons();
+}
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  Sound.init();
+  const isMouse = e.pointerType === 'mouse';
+  setTouchMode(!isMouse);
+  if (isMouse && e.button !== 0) return;
+  const p = toGame(e);
+  aim.x = p.x; aim.y = p.y; aim.mouse = isMouse; aim.inside = true;
+  if (!isMouse) aim.tapT = 0.5;
+  // Track the held trigger (latest finger/button) so the berserk minigun can auto-fire.
+  hold.down = true; hold.id = e.pointerId;
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not supported */ }
+  if (S.mode === 'playing') shoot(p.x, p.y, !isMouse);
+});
+canvas.addEventListener('pointermove', e => {
+  const isMouse = e.pointerType === 'mouse';
+  if (!isMouse && !(hold.down && e.pointerId === hold.id)) return;   // touch aims only while held
+  const p = toGame(e);
+  aim.x = p.x; aim.y = p.y; aim.mouse = isMouse; aim.inside = true;
+  if (!isMouse) aim.tapT = 0.5;
+});
+function releaseTrigger(e) { if (e.pointerId === hold.id) hold.down = false; }
+canvas.addEventListener('pointerup', releaseTrigger);
+canvas.addEventListener('pointercancel', releaseTrigger);
+canvas.addEventListener('lostpointercapture', releaseTrigger);
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') aim.inside = false; });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false });   // no scroll / pull-to-refresh
+document.addEventListener('gesturestart', e => e.preventDefault());                 // no iOS pinch zoom
+document.addEventListener('dblclick', e => e.preventDefault());
+// Unlock audio on the first gesture (iOS only accepts some event types, so listen to several).
+for (const type of ['pointerdown', 'touchend', 'click']) window.addEventListener(type, () => Sound.init(), true);
+
+window.addEventListener('keydown', e => {
+  Sound.init();
+  const k = e.key.toLowerCase();
+  if (k === 'p' || k === 'escape') {
+    if (S.mode === 'playing' || S.mode === 'paused') { e.preventDefault(); togglePause(); }
+  } else if (k === 'm') {
+    toggleMute();
+  } else if ((k === 'enter' || k === ' ') && (S.mode === 'menu' || S.mode === 'over')) {
+    e.preventDefault(); startGame();
+  }
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+// Some phones blur the page briefly while switching to fullscreen; don't treat that as leaving.
+window.addEventListener('blur', () => { if (performance.now() - FS.lastEnter > 1500) pauseGame(); });
+
+/* =====================================================================
+   UI & GAME FLOW
+   ===================================================================== */
+const ICON_SOUND_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>';
+const ICON_SOUND_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 9l6 6M22 9l-6 6"/></svg>';
+const ICON_FS_ENTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
+const ICON_FS_EXIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
+
+// Fullscreen + landscape lock (Android Chrome, iPad, desktop). iPhone Safari has no element
+// fullscreen; there the rotated stage and "Add to Home Screen" cover it.
+const FS = {
+  lastEnter: -1e9,
+  supported() {
+    const d = document.documentElement;
+    return !!((document.fullscreenEnabled || document.webkitFullscreenEnabled) && (d.requestFullscreen || d.webkitRequestFullscreen));
+  },
+  active() { return !!(document.fullscreenElement || document.webkitFullscreenElement); },
+  enter() {
+    if (!this.supported() || this.active()) return;
+    const d = document.documentElement;
+    this.lastEnter = performance.now();
+    try {
+      const p = d.requestFullscreen ? d.requestFullscreen({ navigationUI: 'hide' }) : d.webkitRequestFullscreen();
+      Promise.resolve(p).then(() => {
+        if (screen.orientation && screen.orientation.lock) return screen.orientation.lock('landscape');
+      }).catch(() => {});
+    } catch (e) { /* refused */ }
+  },
+  exit() {
+    if (!this.active()) return;
+    try {
+      const p = document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen();
+      Promise.resolve(p).catch(() => {});
+    } catch (e) { /* ignore */ }
+  },
+  toggle() { this.active() ? this.exit() : this.enter(); }
+};
+
+const UI = {
+  screens: ['startScreen', 'pauseScreen', 'overScreen'],
+  show(id) {
+    for (const s of this.screens) $(s).classList.toggle('show', s === id);
+    document.body.classList.toggle('ingame', !id);
+    updateHudButtons();
+  },
+  refreshFullscreen() {
+    $('btnFull').classList.toggle('hidden', !FS.supported());
+    $('btnFull').innerHTML = FS.active() ? ICON_FS_EXIT : ICON_FS_ENTER;
+    $('btnFull').setAttribute('aria-label', FS.active() ? 'Exit fullscreen' : 'Fullscreen');
+  },
+  showGameOver() {
+    const civ = S.reason === 'civilian';
+    $('overTag').textContent = civ ? 'MISSION FAILED' : 'SHIFT OVER';
+    $('overTag').className = 'tag ' + (civ ? 'bad' : 'time');
+    $('overReason').textContent = civ ? 'You shot a civilian!' : "Time's up!";
+    $('overReason').className = civ ? 'bad' : 'time';
+    $('stScore').textContent = fmt(S.score);
+    $('stHigh').textContent = fmt(S.highScore);
+    $('stCaught').textContent = String(S.hits);
+    // Accuracy covers pistol shots only (minigun spray in berserk would skew it).
+    $('stAcc').textContent = (S.shots ? Math.round((S.landed / S.shots) * 100) : 0) + '%';
+    $('stLevel').textContent = String(S.level + 1);
+    $('stStreak').textContent = String(S.bestKillStreak);
+    $('stDefused').textContent = String(S.bombsDefused);
+    $('stExploded').textContent = String(S.bombsExploded);
+    $('stBerserk').textContent = String(S.berserkCount);
+    $('newHigh').classList.toggle('hidden', !S.newHigh);
+    this.show('overScreen');
+  },
+  refreshMenu() { $('menuBest').textContent = fmt(S.highScore); },
+  refreshSound() {
+    const m = Sound.muted;
+    $('btnMute').innerHTML = m ? ICON_SOUND_OFF : ICON_SOUND_ON;
+    $('btnMute').setAttribute('aria-label', m ? 'Unmute' : 'Mute');
+    document.querySelectorAll('.soundToggle').forEach(b => { b.textContent = m ? 'Sound: Off' : 'Sound: On'; });
+  }
+};
+function updateHudButtons() {
+  $('btnPause').classList.toggle('hidden', !(S.mode === 'playing' || S.mode === 'paused'));
+}
+
+let lastStartAt = -1e9;
+function startGame() {
+  const now = performance.now();
+  if (now - lastStartAt < 350) return;        // guard against double triggers (key + click)
+  lastStartAt = now;
+  Sound.init();
+  if (view.touch || matchMedia('(pointer: coarse)').matches) FS.enter();   // phones: go fullscreen landscape
+  resetRun();
+  S.mode = 'playing';
+  aim.x = W / 2; aim.y = H / 2; aim.tapT = 0;
+  UI.show(null);
+  Sound.play('start');
+}
+function toMenu() {
+  resetRun();                                   // clears ammo, berserk, bombs, streaks and effects
+  Object.assign(S, { mode: 'menu', spawnTimer: 0.4 });
+  UI.refreshMenu();
+  UI.show('startScreen');
+}
+// Pausing stops update(), which freezes the reload, bomb fuses and the berserk timer.
+function pauseGame() {
+  if (S.mode !== 'playing') return;
+  S.mode = 'paused';
+  hold.down = false;
+  Sound.setMinigun(false);
+  UI.show('pauseScreen');
+}
+function resumeGame() {
+  if (S.mode !== 'paused') return;
+  S.mode = 'playing';
+  S.inputGrace = 0.15;
+  UI.show(null);
+}
+function togglePause() { if (S.mode === 'playing') pauseGame(); else resumeGame(); }
+function toggleMute() { Sound.init(); Sound.setMuted(!Sound.muted); UI.refreshSound(); }
+
+function onClick(el, fn, sfx = true) {
+  el.addEventListener('click', e => {
+    e.preventDefault();
+    Sound.init();
+    if (sfx) Sound.play('ui');
+    fn();
+    el.blur();
+  });
+}
+onClick($('btnPlay'), startGame, false);
+onClick($('btnAgain'), startGame, false);
+onClick($('btnRestart'), startGame, false);
+onClick($('btnMenu'), toMenu);
+onClick($('btnQuit'), toMenu);
+onClick($('btnResume'), resumeGame);
+onClick($('btnPause'), togglePause);
+onClick($('btnMute'), toggleMute, false);
+onClick($('btnFull'), () => FS.toggle(), false);
+document.addEventListener('fullscreenchange', () => { UI.refreshFullscreen(); resize(); });
+document.addEventListener('webkitfullscreenchange', () => { UI.refreshFullscreen(); resize(); });
+document.querySelectorAll('.soundToggle').forEach(b => onClick(b, toggleMute, false));
+
+// Start-screen legend: same drawing code as the game.
+function drawLegend(id, look) {
+  const cv = $(id), dpr = Math.min(window.devicePixelRatio || 1, 2), cw = 130, ch = 140;
+  cv.width = cw * dpr; cv.height = ch * dpr;
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const gr = g.createLinearGradient(0, 0, 0, ch);
+  gr.addColorStop(0, '#e7d9bb'); gr.addColorStop(1, '#cdb88f');
+  g.fillStyle = gr; g.fillRect(0, 0, cw, ch);
+  const bomb = !!look.bomb;
+  const s = bomb ? 0.62 : 0.7, coverTop = bomb ? 120 : 116, x = cw / 2 - (look.robber ? 6 : 0);
+  g.save();
+  g.beginPath(); g.rect(0, 0, cw, coverTop); g.clip();
+  g.translate(x, coverTop - CHAR_H * s); g.scale(s, s);
+  drawPerson(g, look, {
+    mode: 'outline', color: bomb ? '#ffb31a' : look.robber ? '#ff2b2b' : '#2cf57a', width: bomb ? 11 : 9,
+    glow: bomb ? 16 * dpr : 0, glowColor: '#ff7a00'
+  });
+  drawPerson(g, look, { mode: 'fill', fuse: 0.7, time: 0.3 });
+  g.restore();
+  g.fillStyle = '#6a4024'; g.fillRect(0, coverTop + 4, cw, ch - coverTop);
+  g.fillStyle = '#efe8da'; g.fillRect(0, coverTop - 2, cw, 9);
+}
+
+/* =====================================================================
+   LAYOUT & MAIN LOOP
+   ===================================================================== */
+const wrap = $('wrap'), stageEl = $('stage');
+let lastLayout = '';
+function resize() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  if (coarse) setTouchMode(true);
+  // Phone held upright: rotate the whole stage so the game fills the screen sideways.
+  const rotated = vh > vw && vw < 600 && coarse;
+  const sw = rotated ? vh : vw, sh = rotated ? vw : vh;      // stage size (always landscape-ish)
+
+  let w = sw, h = (sw * 9) / 16;
+  if (h > sh) { h = sh; w = (sh * 16) / 9; }
+  w = Math.max(1, Math.floor(w)); h = Math.max(1, Math.floor(h));
+  const wl = Math.floor((sw - w) / 2), wt = Math.floor((sh - h) / 2);
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const key = [vw, vh, dpr, rotated].join('x');
+  if (key === lastLayout) return;
+  lastLayout = key;
+
+  Object.assign(view, { rotated, vw, wl, wt, ww: w, wh: h, cssScale: w / W, uiK: clamp(0.72 / (w / W), 1, 1.35) });
+  stageEl.style.width = sw + 'px'; stageEl.style.height = sh + 'px';
+  stageEl.style.transform = rotated ? `translate(${vw}px,0) rotate(90deg)` : 'none';
+  document.body.classList.toggle('rotated', rotated);
+  document.body.classList.toggle('compact', sh < 560 || sw < 700);
+
+  wrap.style.width = w + 'px'; wrap.style.height = h + 'px';
+  wrap.style.left = wl + 'px'; wrap.style.top = wt + 'px';
+  wrap.style.setProperty('--u', (w / W) + 'px');
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  scale = canvas.width / W;
+  buildBackground();
+  window.scrollTo(0, 0);
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));   // iOS reports sizes late
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+const coarseQuery = matchMedia('(pointer: coarse)');
+if (coarseQuery.addEventListener) coarseQuery.addEventListener('change', resize);
+
+let lastT = performance.now();
+function frame(now) {
+  let dt = (now - lastT) / 1000;
+  lastT = now;
+  if (!(dt > 0)) dt = 0;
+  if (dt > 0.05) dt = 0.05;            // clamp after tab switches / hitches
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+// ---- boot ----
+resize();
+drawLegend('legRobber', { robber: true, cloth: '#23262d', skin: '#e0ac7e', flip: false });
+drawLegend('legBomb', { robber: true, bomb: true, cloth: '#ef7d14', skin: '#c68953', flip: false });
+drawLegend('legCiv', { robber: false, shirt: '#4fb8ff', tie: '#2b4fd2', skin: '#f2c9a0', hair: '#5a3a1e', hairStyle: 'short', glasses: false, briefcase: true, flip: false });
+UI.refreshMenu();
+UI.refreshSound();
+UI.refreshFullscreen();
+UI.show('startScreen');
+requestAnimationFrame(t => { lastT = t; frame(t); });
+
+})();
+</script>
+</body>
+</html>
