@@ -283,8 +283,8 @@
 const W = 1280, H = 720, TAU = Math.PI * 2;
 const FONT = '"Arial Black","Segoe UI Black","Helvetica Neue",Impact,Arial,sans-serif';
 const CHAR_H = 160;                       // visible body height (local units) when fully up
-const RISE_T = 0.16, DUCK_T = 0.14, HIT_T = 0.6;     // pop-up / duck times at level 1
-const SPEEDUP_PER_LEVEL = 0.05, SPEEDUP_MAX = 1.6;  // targets pop up & duck 5% faster each level, up to 60%
+const RISE_T = 0.16, DUCK_T = 0.14, HIT_T = 0.6;   // base pop-up / duck times at level 1
+const TARGET_SPEEDUP = 0.05, TARGET_SPEED_MAX = 1.6;   // pop-up & duck get 5% faster per level, up to +60%
 const TIME_START = 25, TIME_MAX = 45, TIME_HIT = 1, TIME_HEAD = 1.75;
 const MAX_ON_SCREEN = 5;
 const HITS_PER_LEVEL = 4;                 // level = 1 + floor(robbers hit / 4)
@@ -609,11 +609,13 @@ const SFX = {
    SPAWNER & DIFFICULTY
    ===================================================================== */
 function difficulty() {
-  if (S.mode === 'menu') return { visible: 1.8, interval: 0.85, maxActive: 3, civChance: 0.35, bombChance: 0, burstChance: 0, burstMax: 2 };
-  // Berserk: robbers only, fast and plenty of them.
-  if (S.berserk) return { visible: 1.0, interval: 0.16, maxActive: MAX_ON_SCREEN, civChance: 0, bombChance: 0, burstChance: 0.4, burstMax: 3 };
+  if (S.mode === 'menu') return { visible: 1.8, interval: 0.85, maxActive: 3, civChance: 0.35, bombChance: 0, burstChance: 0, burstMax: 2, speed: 1 };
   const lvl = S.level;                                    // +1 level every HITS_PER_LEVEL robbers
+  const speed = Math.min(TARGET_SPEED_MAX, 1 + TARGET_SPEEDUP * lvl);   // pop-up / duck animation speed
+  // Berserk: robbers only, fast and plenty of them.
+  if (S.berserk) return { visible: 1.0, interval: 0.16, maxActive: MAX_ON_SCREEN, civChance: 0, bombChance: 0, burstChance: 0.4, burstMax: 3, speed };
   return {
+    speed,
     visible: Math.max(0.45, 1.1 * Math.pow(0.92, lvl)),   // -8% per level, floor 0.45s
     interval: Math.max(0.25, 0.8 * Math.pow(0.87, lvl)),  // -13% per level, floor 0.25s
     maxActive: Math.min(MAX_ON_SCREEN, 1 + lvl),
@@ -639,20 +641,15 @@ function makeLook(type, bomb) {
   };
 }
 
-// How much faster targets move (pop up / duck) at the current level: 1.0 at level 1.
-function targetSpeed() {
-  return S.mode === 'menu' ? 1 : Math.min(SPEEDUP_MAX, 1 + SPEEDUP_PER_LEVEL * S.level);
-}
-
 function spawnCharacter(type, bomb = false) {
   const free = freeSpots();
   if (!free.length) return null;
-  const spot = pick(free), d = difficulty(), speed = targetSpeed();
+  const spot = pick(free), d = difficulty();
   const c = {
     id: nextId++, type, spot, state: 'rising', t: 0, pop: 0, angle: 0,
-    riseT: RISE_T / speed, duckT: DUCK_T / speed,
     flash: 0, flashColor: '#fff', fallDir: 1, born: S.clock, safe: false,
     visible: bomb ? Infinity : d.visible * rand(0.9, 1.15) * (type === 'civilian' ? 1.1 : 1),
+    riseT: RISE_T / d.speed, duckT: DUCK_T / d.speed,   // fixed at spawn so a level-up never jolts a target mid-motion
     look: makeLook(type, bomb),
     bomb, hp: bomb ? BOMB_HP : 1, bombT: BOMB_T, beepT: 0.15, beepFlash: 0, wobble: 0
   };
